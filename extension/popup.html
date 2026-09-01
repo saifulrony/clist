@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 380px; min-height: 200px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0;
+    }
+    .header {
+      padding: 16px 20px;
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .header svg { width: 24px; height: 24px; color: white; }
+    .header h1 { font-size: 16px; font-weight: 700; color: white; }
+    .header p { font-size: 11px; color: rgba(255,255,255,0.8); }
+    .content { padding: 16px 20px; }
+    .status-card {
+      background: #1e293b; border-radius: 10px; padding: 14px;
+      margin-bottom: 12px; border: 1px solid #334155;
+    }
+    .status-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .status-row:last-child { margin-bottom: 0; }
+    .status-label { font-size: 12px; color: #94a3b8; }
+    .status-value { font-size: 13px; font-weight: 600; color: #e2e8f0; }
+    .status-value.green { color: #22c55e; }
+    .status-value.amber { color: #f59e0b; }
+    .status-value.red { color: #ef4444; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    }
+    .badge.green { background: #052e16; color: #22c55e; }
+    .badge.amber { background: #451a03; color: #f59e0b; }
+    .badge.red { background: #450a0a; color: #ef4444; }
+    .badge.blue { background: #172554; color: #3b82f6; }
+    .extracted-list {
+      max-height: 200px; overflow-y: auto; margin: 12px 0;
+    }
+    .extracted-item {
+      padding: 8px 10px; border-bottom: 1px solid #1e293b;
+      font-size: 12px; display: flex; justify-content: space-between;
+    }
+    .extracted-item:last-child { border-bottom: none; }
+    .extracted-name { font-weight: 600; color: #e2e8f0; }
+    .extracted-info { color: #64748b; font-size: 11px; }
+    .btn {
+      width: 100%; padding: 10px; border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .btn-primary { background: #3b82f6; color: white; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+    .btn-success { background: #22c55e; color: white; }
+    .btn-success:hover { background: #16a34a; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-group { display: flex; gap: 8px; margin-top: 8px; }
+    .btn-group .btn { flex: 1; }
+    .settings { margin-top: 12px; }
+    .input {
+      width: 100%; padding: 8px 10px; background: #0f172a; border: 1px solid #334155;
+      border-radius: 6px; color: #e2e8f0; font-size: 12px; outline: none;
+    }
+    .input:focus { border-color: #3b82f6; }
+    .label { font-size: 11px; color: #64748b; margin-bottom: 4px; display: block; }
+    .divider { height: 1px; background: #334155; margin: 12px 0; }
+    .empty { text-align: center; padding: 20px; color: #64748b; font-size: 12px; }
+    .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid white; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .toast {
+      position: fixed; bottom: 12px; left: 12px; right: 12px;
+      padding: 10px; border-radius: 8px; font-size: 12px; font-weight: 600;
+      text-align: center; z-index: 999; transition: all 0.3s;
+    }
+    .toast.success { background: #052e16; color: #22c55e; }
+    .toast.error { background: #450a0a; color: #ef4444; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+    </svg>
+    <div>
+      <h1>ClientList Scraper</h1>
+      <p>Extract business data from directories</p>
+    </div>
+  </div>
+
+  <div class="content">
+    <div class="status-card">
+      <div class="status-row">
+        <span class="status-label">Status</span>
+        <span id="status" class="badge blue">Checking...</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Page</span>
+        <span id="pageType" class="status-value">-</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Found</span>
+        <span id="businessCount" class="status-value">0 businesses</span>
+      </div>
+    </div>
+
+    <div id="extractedList" class="extracted-list" style="display:none;"></div>
+
+    <button id="extractBtn" class="btn btn-primary" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      Extract from Page
+    </button>
+
+    <button id="enrichBtn" class="btn btn-primary" disabled style="margin-top:8px;background:#7c3aed;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+      </svg>
+      Auto-Enrich All
+    </button>
+    <div id="enrichProgress" style="display:none;padding:4px 8px;font-size:10px;color:#c4b5fd;background:#2e1065;border-radius:4px;margin-top:4px;text-align:center;"></div>
+
+    <div style="margin-top:8px;padding:6px 8px;background:#172554;border-radius:6px;font-size:10px;color:#93c5fd;line-height:1.4;">
+      <strong>Extract:</strong> Gets names/ratings from search results.<br/>
+      <strong>Auto-Enrich:</strong> Clicks each business to get address, phone, website. ~5s per business.<br/>
+      <strong>Note:</strong> Email is not available on Google Maps/Yellow Pages/Yelp.
+    </div>
+
+    <div class="btn-group">
+      <button id="saveBtn" class="btn btn-success" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/>
+        </svg>
+        Save to DB
+      </button>
+      <button id="clearBtn" class="btn btn-danger" disabled>Clear</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="settings">
+      <label class="label">Backend URL</label>
+      <input id="apiBase" class="input" type="text" placeholder="http://192.168.10.203:18001" />
+      <button id="saveSettings" class="btn btn-primary" style="margin-top:8px;padding:6px;font-size:11px;">Save Settings</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" style="display:none;"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
