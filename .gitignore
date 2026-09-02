@@ -1,0 +1,7 @@
+frontend/node_modules/
+frontend/.next/
+frontend/.env*
+frontend/.vercel
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
