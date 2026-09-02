@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClientList - Commercial Blueprint & SaaS Valuation Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Background Glow FX -->
+  <div class="glow-bg glow-1"></div>
+  <div class="glow-bg glow-2"></div>
+  <div class="glow-bg glow-3"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="top-nav">
+      <div class="nav-left">
+        <div class="logo-mark">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">ClientList <span class="badge-pill">Commercial Blueprint</span></div>
+          <div class="brand-subtitle">Valuation &bull; Monthly Rental SaaS &bull; Cold Email Client Projections</div>
+        </div>
+      </div>
+      <div class="nav-right">
+        <a href="http://192.168.10.203:18000/templates/builder" class="btn-ghost" target="_blank">Open Email Builder &rarr;</a>
+        <a href="http://192.168.10.203:18000/crawl?tab=campaign" class="btn-ghost" target="_blank">Campaign Dashboard &rarr;</a>
+        <button class="btn-primary" id="printBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+          Print Report
+        </button>
+      </div>
+    </header>
+
+    <!-- Executive KPI Grid -->
+    <section class="kpi-grid">
+      <div class="kpi-card accent-blue">
+        <div class="kpi-top">
+          <span class="kpi-icon">💎</span>
+          <span class="kpi-tag">Full Sale Asset</span>
+        </div>
+        <div class="kpi-val">$8,000 – $15,000</div>
+        <div class="kpi-label">Turnkey Codebase & Proprietary Suite</div>
+        <div class="kpi-sub">Or <strong class="text-emerald">$100K+</strong> with just $2.5K MRR</div>
+      </div>
+
+      <div class="kpi-card accent-purple">
+        <div class="kpi-top">
+          <span class="kpi-icon">🔄</span>
+          <span class="kpi-tag">Recommended SaaS Fee</span>
+        </div>
+        <div class="kpi-val">$59 / mo</div>
+        <div class="kpi-label">Growth / Agency Sweet-Spot Plan</div>
+        <div class="kpi-sub">50 active clients = <strong class="text-purple">$2,950/mo (~৳3.6L BDT)</strong></div>
+      </div>
+
+      <div class="kpi-card accent-emerald">
+        <div class="kpi-top">
+          <span class="kpi-icon">🎯</span>
+          <span class="kpi-tag">Outreach Conversion</span>
+        </div>
+        <div class="kpi-val">8 – 15 Clients</div>
+        <div class="kpi-label">Monthly Paid Acquisitions per 3K emails</div>
+        <div class="kpi-sub">Based on 60% open rate & 25% demo close</div>
+      </div>
+
+      <div class="kpi-card accent-amber">
+        <div class="kpi-top">
+          <span class="kpi-icon">📈</span>
+          <span class="kpi-tag">Month 6 Forecast</span>
+        </div>
+        <div class="kpi-val">$4,500+ MRR</div>
+        <div class="kpi-label">Projected Monthly Recurring Revenue</div>
+        <div class="kpi-sub">Annual Recurring Revenue (ARR): <strong>$54,000+</strong></div>
+      </div>
+    </section>
+
+    <!-- Main Tab Navigation -->
+    <nav class="tabs-nav" id="mainTabs">
+      <button class="tab-btn active" data-tab="valuation">
+        <span>💰</span> Full Sale Valuation
+      </button>
+      <button class="tab-btn" data-tab="saas-model">
+        <span>🏢</span> Monthly Rental (SaaS)
+      </button>
+      <button class="tab-btn" data-tab="outreach-funnel">
+        <span>🚀</span> Cold Email Client Funnel
+      </button>
+      <button class="tab-btn" data-tab="calculator">
+        <span>🧮</span> Interactive ROI Calculator
+      </button>
+      <button class="tab-btn" data-tab="roadmap">
+        <span>🗺️</span> 6-Month Action Roadmap
+      </button>
+    </nav>
+
+    <!-- TAB 1: VALUATION -->
+    <main class="tab-content active" id="tab-valuation">
+      <div class="content-header">
+        <h2>Software Asset Valuation & Full Acquisition Potential</h2>
+        <p>A comprehensive assessment of the Intellectual Property (IP), technology stack, and commercial multiples.</p>
+      </div>
+
+      <div class="two-col-grid">
+        <!-- Asset Composition Card -->
+        <div class="glass-card">
+          <div class="card-title">
+            <span class="badge-circle">1</span>
+            What Makes This Codebase Highly Valuable?
+          </div>
+          <p class="card-desc">Unlike generic templates, this project bundles 4 complex enterprise modules into a unified architecture:</p>
+          
+          <ul class="feature-list">
+            <li>
+              <div class="feat-icon">⚡</div>
+              <div>
+                <strong>Go Concurrency Crawler & API</strong>
+                <p>High-throughput business scrapers (Google Maps, YellowPages) with concurrent goroutine workers and SQLite storage.</p>
+              </div>
+            </li>
+            <li>
+              <div class="feat-icon">🧩</div>
+              <div>
+                <strong>Chrome Manifest V3 Extension</strong>
+                <p>1-Click instant map scraper that crawls businesses, emails, and phone numbers in real-time from browser tabs.</p>
+              </div>
+            </li>
+            <li>
+              <div class="feat-icon">🎨</div>
+              <div>
+                <strong>17-Widget Drag-and-Drop Visual Email Builder</strong>
+                <p>Mailchimp/Stripo alternative featuring Video, Product Cards, Star Reviews, Live Countdown Timers, and 18 categorized starter presets.</p>
+              </div>
+            </li>
+            <li>
+              <div class="feat-icon">🛡️</div>
+              <div>
+                <strong>Real-Time SMTP Handshake Email Verifier</strong>
+                <p>Checks DNS MX records, syntax, and live socket connection to guarantee zero bounce rates before sending.</p>
+              </div>
+            </li>
+            <li>
+              <div class="feat-icon">📊</div>
+              <div>
+                <strong>Multi-Step Campaign Engine with Tracking</strong>
+                <p>Spintax parser, variable merge tags ({{name}}, {{company}}), open-pixel tracking, and click redirect tokens.</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Valuation Matrices Card -->
+        <div class="glass-card">
+          <div class="card-title">
+            <span class="badge-circle">2</span>
+            Valuation Multiple Scenarios
+          </div>
+          <p class="card-desc">Comparing an asset sale (zero revenue) vs a launched SaaS platform on Acquire.com or Flippa:</p>
+
+          <div class="matrix-card">
+            <div class="matrix-header">
+              <span class="matrix-badge">Scenario A: Turnkey Codebase Sale</span>
+              <span class="matrix-price">$4,000 – $8,000</span>
+            </div>
+            <p class="matrix-text">Sold on Flippa or private marketplace as a complete, unlaunched source-code asset to an entrepreneur or agency wanting instant tech ownership.</p>
+          </div>
+
+          <div class="matrix-card highlight-border">
+            <div class="matrix-header">
+              <span class="matrix-badge bg-indigo">Scenario B: In-House Agency Buyout</span>
+              <span class="matrix-price text-indigo">$8,000 – $15,000</span>
+            </div>
+            <p class="matrix-text">Sold to an outbound sales agency or lead-gen firm looking to replace their Apollo ($99/mo) and Mailchimp ($60/mo) monthly software bill forever with a private in-house tool.</p>
+          </div>
+
+          <div class="matrix-card highlight-emerald">
+            <div class="matrix-header">
+              <span class="matrix-badge bg-emerald">Scenario C: Live SaaS with $2.5K MRR</span>
+              <span class="matrix-price text-emerald">$100,000 – $140,000</span>
+            </div>
+            <p class="matrix-text">SaaS valuation standard: <strong>3.5x to 4.5x ARR</strong>. At $2,500/month ($30,000/year), investors on Acquire.com pay <strong>$105,000+ USD (~৳1.3 Crore BDT)</strong>.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- TAB 2: MONTHLY RENTAL (SAAS) -->
+    <main class="tab-content" id="tab-saas-model">
+      <div class="content-header">
+        <h2>Why Customers Will Gladly Pay Monthly Subscription (SaaS)</h2>
+        <p>A cost comparison of disparate market tools versus ClientList's all-in-one unified value proposition.</p>
+      </div>
+
+      <!-- Cost Comparison Table -->
+      <div class="glass-card mb-6">
+        <div class="card-title">Competitor Fragmentation vs ClientList Solution</div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Workflow Stage</th>
+                <th>Traditional Multi-Tool Stack</th>
+                <th>Standard Market Cost</th>
+                <th>ClientList All-in-One Solution</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>1. B2B Lead Scraping</strong></td>
+                <td>Apollo.io / ZoomInfo</td>
+                <td><span class="price-red">$79 – $119 / mo</span></td>
+                <td><span class="price-green">Included (Google Maps & Extension)</span></td>
+              </tr>
+              <tr>
+                <td><strong>2. Email Verification</strong></td>
+                <td>NeverBounce / ZeroBounce</td>
+                <td><span class="price-red">$25 – $45 / mo</span></td>
+                <td><span class="price-green">Included (Built-in MX & SMTP handshake)</span></td>
+              </tr>
+              <tr>
+                <td><strong>3. Visual Drag-and-Drop Builder</strong></td>
+                <td>Mailchimp / Stripo / Klaviyo</td>
+                <td><span class="price-red">$35 – $75 / mo</span></td>
+                <td><span class="price-green">Included (17 widgets + 18 presets)</span></td>
+              </tr>
+              <tr>
+                <td><strong>4. Outbound Sequence Sender</strong></td>
+                <td>Instantly / Lemlist</td>
+                <td><span class="price-red">$37 – $59 / mo</span></td>
+                <td><span class="price-green">Included (Multi-step + Spintax + Tokens)</span></td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="2"><strong>Total Monthly Expense for Agencies:</strong></td>
+                <td><strong class="text-red">$176 – $298 / month</strong></td>
+                <td><strong class="text-emerald">Only $59 / month (Save 75%+)</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 3-Tier SaaS Pricing Model -->
+      <div class="card-title mb-3">Recommended SaaS Monthly Pricing Architecture</div>
+      <div class="pricing-tiers-grid">
+        <div class="tier-card">
+          <div class="tier-name">Starter / Solopreneur</div>
+          <div class="tier-price">$29 <span>/ month</span></div>
+          <div class="tier-desc">Ideal for freelancers, solo consultants, and local businesses starting outbound.</div>
+          <ul class="tier-features">
+            <li>✓ 1,000 Verified Local Business Leads/mo</li>
+            <li>✓ Unlimited Email Verification Handshakes</li>
+            <li>✓ Visual Drag & Drop Builder (17 Widgets)</li>
+            <li>✓ 5,000 Cold Emails / month</li>
+            <li>✓ Open & Click Tracking Analytics</li>
+          </ul>
+        </div>
+
+        <div class="tier-card popular">
+          <div class="popular-ribbon">MOST POPULAR (SWEET SPOT)</div>
+          <div class="tier-name">Growth / Agency</div>
+          <div class="tier-price">$59 <span>/ month</span></div>
+          <div class="tier-desc">Designed for marketing agencies, B2B software, and dedicated sales reps.</div>
+          <ul class="tier-features">
+            <li>✓ 5,000 Verified Leads/mo + Unlimited Extension</li>
+            <li>✓ 18 Premium Starter Presets Included</li>
+            <li>✓ Multi-step Sequences & Spintax Rotation</li>
+            <li>✓ 25,000 Cold Emails / month</li>
+            <li>✓ Image Upload & Stock Gallery Hosting</li>
+            <li>✓ Priority SMTP Connection & Support</li>
+          </ul>
+        </div>
+
+        <div class="tier-card">
+          <div class="tier-name">Enterprise / White-Label</div>
+          <div class="tier-price">$129 <span>/ month</span></div>
+          <div class="tier-desc">For high-volume outreach teams requiring custom branding and dedicated IPs.</div>
+          <ul class="tier-features">
+            <li>✓ 15,000+ Verified Leads / month</li>
+            <li>✓ Multi-user Team Workspace Seats</li>
+            <li>✓ Custom Branding & White-Label Domain</li>
+            <li>✓ Unlimited Email Sending & CSV Exports</li>
+            <li>✓ Webhook Integrations (Zapier / CRM)</li>
+            <li>✓ Dedicated Onboarding Session</li>
+          </ul>
+        </div>
+      </div>
+    </main>
+
+    <!-- TAB 3: OUTREACH FUNNEL -->
+    <main class="tab-content" id="tab-outreach-funnel">
+      <div class="content-header">
+        <h2>Cold Email Acquisition Model: How to Get 8–15 Clients Monthly</h2>
+        <p>A proven, data-driven math framework based on sending 100–120 verified emails daily with your own platform.</p>
+      </div>
+
+      <div class="funnel-container">
+        <!-- Step 1 -->
+        <div class="funnel-step">
+          <div class="funnel-num">1</div>
+          <div class="funnel-body">
+            <div class="funnel-title">Total Verified Sends: 3,000 Emails / month</div>
+            <div class="funnel-stat">100 to 120 sends/day &bull; 0% bounce rate via built-in verifier</div>
+            <p>Using Google Maps scraper to find Digital Agencies, Web Designers, and B2B Consultancies.</p>
+          </div>
+          <div class="funnel-pct">100%</div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="funnel-step">
+          <div class="funnel-num">2</div>
+          <div class="funnel-body">
+            <div class="funnel-title">Opened Emails: ~1,800 Opens</div>
+            <div class="funnel-stat">60% Open Rate achieved with personalized {{company}} and {{city}} tags</div>
+            <p>Using intriguing 1-sentence subject lines like: <em>"Quick question regarding {{company}}'s client acquisition in {{city}}"</em>.</p>
+          </div>
+          <div class="funnel-pct">60%</div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="funnel-step">
+          <div class="funnel-num">3</div>
+          <div class="funnel-body">
+            <div class="funnel-title">Replies & Positive Interest: 90 – 120 Responses</div>
+            <div class="funnel-stat">3% to 4% Reply Rate using the Irresistible Lead Magnet Offer</div>
+            <p><strong>The Golden Offer:</strong> <em>"We crawl 100 verified decision-makers for your agency for free + 14-day free trial."</em></p>
+          </div>
+          <div class="funnel-pct">3.5%</div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="funnel-step">
+          <div class="funnel-num">4</div>
+          <div class="funnel-body">
+            <div class="funnel-title">Live Demos / Free Trial Signups: 30 – 45 Users</div>
+            <div class="funnel-stat">1% to 1.5% qualified conversion to hands-on testing</div>
+            <p>Prospects test the visual email builder and see the real scraped leads live on their screen.</p>
+          </div>
+          <div class="funnel-pct">1.2%</div>
+        </div>
+
+        <!-- Step 5 -->
+        <div class="funnel-step highlight-step">
+          <div class="funnel-num star">★</div>
+          <div class="funnel-body">
+            <div class="funnel-title text-emerald">Paying Monthly Clients: 8 – 15 New Clients / mo</div>
+            <div class="funnel-stat">25% to 30% closing rate from trial to paid ($59/mo plan)</div>
+            <p>Generates <strong>+$500 to +$900 in fresh MRR</strong> every single month!</p>
+          </div>
+          <div class="funnel-pct text-emerald">0.4%</div>
+        </div>
+      </div>
+
+      <!-- Target Niches -->
+      <div class="two-col-grid mt-6">
+        <div class="glass-card">
+          <div class="card-title">Top 4 High-Converting Target Niches</div>
+          <div class="niche-item">
+            <span class="niche-icon">🎨</span>
+            <div>
+              <strong>Web Design & SEO Agencies</strong>
+              <p>Constantly hungry for local businesses without websites or with outdated Google listings.</p>
+            </div>
+          </div>
+          <div class="niche-item">
+            <span class="niche-icon">🏢</span>
+            <div>
+              <strong>Commercial Real Estate & Brokers</strong>
+              <p>Need localized phone numbers and owner emails for office leases and property acquisitions.</p>
+            </div>
+          </div>
+          <div class="niche-item">
+            <span class="niche-icon">💼</span>
+            <div>
+              <strong>B2B Sales Consultants & Recruiters</strong>
+              <p>Spend hundreds of dollars on Apollo and LinkedIn Sales Navigator each month.</p>
+            </div>
+          </div>
+          <div class="niche-item">
+            <span class="niche-icon">💻</span>
+            <div>
+              <strong>Software & SaaS Companies</strong>
+              <p>Need email verification and rich HTML email templates for user re-engagement and product launches.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="glass-card">
+          <div class="card-title">The 3 Best Cold Email Copy Templates</div>
+          <div class="template-sample">
+            <div class="tmpl-badge">Template 1: The Value Offer (High Reply)</div>
+            <p class="tmpl-body">
+              "Hi {{name}}, I was checking {{company}}'s impressive portfolio in {{city}}.<br><br>
+              We built a tool that pulls verified decision-makers directly from Google Maps and sends Mailchimp-style personalized campaigns with 0% bounce rate.<br><br>
+              Can I send you 50 verified leads in {{city}} completely free so you can test the quality?"
+            </p>
+          </div>
+          <div class="template-sample mt-3">
+            <div class="tmpl-badge">Template 2: The Polite Breakup (Permission)</div>
+            <p class="tmpl-body">
+              "Hi {{name}}, haven't heard back on our note regarding {{company}}'s client acquisition. Should I close your file, or are you interested but just caught up with client work right now?"
+            </p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- TAB 4: CALCULATOR -->
+    <main class="tab-content" id="tab-calculator">
+      <div class="content-header">
+        <h2>Interactive Revenue, MRR & Valuation Calculator</h2>
+        <p>Adjust the sliders below to see real-time revenue forecasts, subscriber growth, and business exit valuation.</p>
+      </div>
+
+      <div class="calc-grid">
+        <!-- Sliders Form -->
+        <div class="glass-card">
+          <div class="card-title">Campaign & Pricing Inputs</div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label>Monthly Cold Emails Sent</label>
+              <span class="slider-val" id="valEmails">3,000</span>
+            </div>
+            <input type="range" id="inputEmails" min="1000" max="15000" step="500" value="3000">
+            <div class="slider-hint">Safe limit: 100–150 emails/day per domain.</div>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label>Average Monthly Subscription Plan ($)</label>
+              <span class="slider-val" id="valPrice">$59</span>
+            </div>
+            <input type="range" id="inputPrice" min="29" max="129" step="10" value="59">
+            <div class="slider-hint">Standard options: $29 (Starter), $59 (Growth), $129 (Enterprise).</div>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label>Conversion to Paid Client</label>
+              <span class="slider-val" id="valConv">0.35%</span>
+            </div>
+            <input type="range" id="inputConv" min="0.1" max="1.0" step="0.05" value="0.35">
+            <div class="slider-hint">Standard benchmark: 0.25% – 0.50% of total cold email sends.</div>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-header">
+              <label>Average Client Retention (Months)</label>
+              <span class="slider-val" id="valRetention">8 months</span>
+            </div>
+            <input type="range" id="inputRetention" min="3" max="18" step="1" value="8">
+            <div class="slider-hint">B2B SaaS average client lifespan is 6–12 months.</div>
+          </div>
+        </div>
+
+        <!-- Real-Time Output Card -->
+        <div class="glass-card result-panel">
+          <div class="card-title">Projected Commercial Outputs</div>
+
+          <div class="result-box accent-border-blue">
+            <div class="res-label">New Paid Clients Added / Month</div>
+            <div class="res-num text-blue" id="resNewClients">11 clients</div>
+            <div class="res-desc">Systematic monthly recurring additions</div>
+          </div>
+
+          <div class="result-box accent-border-emerald">
+            <div class="res-label">Target Steady-State MRR (Monthly Revenue)</div>
+            <div class="res-num text-emerald" id="resMRR">$5,192 / mo</div>
+            <div class="res-desc">Approx. <strong class="text-white" id="resBDT">৳ 6,33,000 BDT</strong> per month</div>
+          </div>
+
+          <div class="result-box accent-border-purple">
+            <div class="res-label">Annual Recurring Revenue (ARR)</div>
+            <div class="res-num text-purple" id="resARR">$62,304 / yr</div>
+            <div class="res-desc">Full annualized gross software revenue</div>
+          </div>
+
+          <div class="result-box highlight-gold">
+            <div class="res-label">Estimated Business Exit Valuation (at 4x ARR)</div>
+            <div class="res-num text-gold" id="resValuation">$249,200 USD</div>
+            <div class="res-desc">On Acquire.com / Flippa (~৳ 3.0 Crore BDT valuation)</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- TAB 5: ROADMAP -->
+    <main class="tab-content" id="tab-roadmap">
+      <div class="content-header">
+        <h2>6-Month Strategic Execution Roadmap</h2>
+        <p>Step-by-step instructions to turn this codebase into a scalable, high-earning SaaS business.</p>
+      </div>
+
+      <div class="timeline">
+        <div class="time-item">
+          <div class="time-dot">M1</div>
+          <div class="time-content">
+            <h4>Month 1: Production Launch & Cloud Infrastructure</h4>
+            <p>Deploy Go backend and Next.js frontend to a VPS (Hetzner or DigitalOcean) with a custom brand domain (e.g. <code>app.clientlist.pro</code>). Configure Cloudflare SSL, Stripe / LemonSqueezy payment gateway, and verify transactional emails.</p>
+          </div>
+        </div>
+
+        <div class="time-item">
+          <div class="time-dot">M2</div>
+          <div class="time-content">
+            <h4>Month 2: 50 Beta Agencies & Cold Outreach Engine</h4>
+            <p>Use the built-in scraper to pull 2,000 web design and marketing agencies. Launch the 100-free-leads campaign. Onboard 30 to 50 free trial users to gather testimonials and refine UI UX.</p>
+          </div>
+        </div>
+
+        <div class="time-item">
+          <div class="time-dot">M3</div>
+          <div class="time-content">
+            <h4>Month 3: Reaching First $1,500 MRR Milestone</h4>
+            <p>Convert 25 active paying customers on the $59/month Growth plan. Launch the Chrome extension in the official Chrome Web Store for organic viral discovery.</p>
+          </div>
+        </div>
+
+        <div class="time-item">
+          <div class="time-dot">M6</div>
+          <div class="time-content">
+            <h4>Month 6: Scaling to $4,500+ MRR or Profitable Exit</h4>
+            <p>Reach 75–90 paying monthly clients ($4,500+ MRR / ~$54,000 ARR). At this stage, you can either enjoy pure passive monthly cashflow or list the business on Acquire.com for $150,000 – $220,000 USD!</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>&copy; 2026 ClientList Platform Commercial Intelligence. Prepared for Saiful Rony.</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

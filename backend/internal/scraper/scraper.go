@@ -78,8 +78,8 @@ func (c *Client) scrapeWebsite(ctx context.Context, biz models.Business) models.
 		return biz
 	}
 
-	// Try main page + /contact + /about
-	paths := []string{"", "/contact", "/about", "/contact-us", "/about-us", "/impressum"}
+	// Try main page + contact + about + team paths
+	paths := []string{"", "/contact", "/about", "/about-us", "/team", "/our-team", "/leadership", "/management", "/impressum"}
 	var allHTML strings.Builder
 
 	for _, path := range paths {
@@ -89,7 +89,7 @@ func (c *Client) scrapeWebsite(ctx context.Context, biz models.Business) models.
 		target := u.Scheme + "://" + u.Host + path
 		html := c.fetchPage(ctx, target)
 		allHTML.WriteString(html)
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	html := allHTML.String()
@@ -111,7 +111,43 @@ func (c *Client) scrapeWebsite(ctx context.Context, biz models.Business) models.
 		}
 	}
 
+	// Extract LinkedIn
+	if biz.LinkedIn == "" {
+		if m := liRegex.FindStringSubmatch(html); len(m) > 0 {
+			biz.LinkedIn = "https://linkedin.com/in/" + m[1]
+		}
+	}
+
+	// Extract Decision Maker
+	if biz.DecisionMaker == "" {
+		biz.DecisionMaker = extractDecisionMaker(html)
+	}
+
 	return biz
+}
+
+func extractDecisionMaker(html string) string {
+	// Pattern 1: "John Doe - Founder & CEO" or "John Doe, Founder"
+	p1 := regexp.MustCompile(`(?i)(?:^|[\n\r<>"]|\s{2,})([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})[\s,–—\-|:]+(?:is the\s+|our\s+)?(CEO|Founder|Co-Founder|President|Owner|Managing Director|Principal|Partner)(?:[\s,<\n\r"]|$)`)
+	if m := p1.FindStringSubmatch(html); len(m) > 2 {
+		name := strings.TrimSpace(m[1])
+		role := strings.TrimSpace(m[2])
+		if len(name) > 3 && len(name) < 30 && !strings.Contains(strings.ToLower(name), "copyright") {
+			return fmt.Sprintf("%s (%s)", name, role)
+		}
+	}
+
+	// Pattern 2: "Founder: John Doe" or "CEO & Founder - John Doe"
+	p2 := regexp.MustCompile(`(?i)(?:^|[\n\r<>"]|\s{2,})(CEO|Founder|Co-Founder|President|Owner|Managing Director|Principal|Partner)[\s,–—\-|:]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})(?:[\s,<\n\r"]|$)`)
+	if m := p2.FindStringSubmatch(html); len(m) > 2 {
+		role := strings.TrimSpace(m[1])
+		name := strings.TrimSpace(m[2])
+		if len(name) > 3 && len(name) < 30 && !strings.Contains(strings.ToLower(name), "copyright") {
+			return fmt.Sprintf("%s (%s)", name, role)
+		}
+	}
+
+	return ""
 }
 
 func (c *Client) fetchPage(ctx context.Context, url string) string {

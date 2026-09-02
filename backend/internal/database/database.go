@@ -134,6 +134,95 @@ func (db *DB) migrate() error {
 			value TEXT NOT NULL,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS subscriptions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			plan TEXT NOT NULL DEFAULT 'free',
+			stripe_customer_id TEXT,
+			stripe_subscription_id TEXT,
+			status TEXT DEFAULT 'active',
+			emails_limit INTEGER DEFAULT 100,
+			emails_sent INTEGER DEFAULT 0,
+			contacts_limit INTEGER DEFAULT 500,
+			period_start DATETIME DEFAULT CURRENT_TIMESTAMP,
+			period_end DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS teams (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			owner_id INTEGER NOT NULL,
+			plan TEXT DEFAULT 'free',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (owner_id) REFERENCES users(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS team_members (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			team_id INTEGER NOT NULL,
+			user_id INTEGER NOT NULL,
+			role TEXT DEFAULT 'member',
+			invited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			accepted_at DATETIME,
+			FOREIGN KEY (team_id) REFERENCES teams(id),
+			FOREIGN KEY (user_id) REFERENCES users(id),
+			UNIQUE(team_id, user_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS email_templates (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER,
+			name TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			body TEXT NOT NULL,
+			category TEXT DEFAULT 'general',
+			is_public INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS landing_pages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			title TEXT NOT NULL,
+			slug TEXT NOT NULL UNIQUE,
+			subheadline TEXT,
+			description TEXT,
+			form_fields TEXT DEFAULT '["email","name"]',
+			theme TEXT DEFAULT 'default',
+			settings TEXT DEFAULT '{}',
+			published INTEGER DEFAULT 0,
+			views INTEGER DEFAULT 0,
+			submissions INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS landing_page_submissions (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			page_id INTEGER NOT NULL,
+			data TEXT NOT NULL,
+			ip_address TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (page_id) REFERENCES landing_pages(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS webhooks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			url TEXT NOT NULL,
+			events TEXT NOT NULL DEFAULT '["campaign.sent"]',
+			secret TEXT,
+			active INTEGER DEFAULT 1,
+			last_triggered DATETIME,
+			last_status INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_email_templates_user ON email_templates(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_landing_pages_user ON landing_pages(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_landing_pages_slug ON landing_pages(slug)`,
+		`CREATE INDEX IF NOT EXISTS idx_webhooks_user ON webhooks(user_id)`,
 	}
 
 	for _, q := range queries {
@@ -141,6 +230,33 @@ func (db *DB) migrate() error {
 			return err
 		}
 	}
+
+	// Auto-migrations for lead generation and compliance enhancements
+	db.conn.Exec("ALTER TABLE businesses ADD COLUMN email_status TEXT DEFAULT 'unverified'")
+	db.conn.Exec("ALTER TABLE businesses ADD COLUMN decision_maker TEXT DEFAULT ''")
+	db.conn.Exec("ALTER TABLE businesses ADD COLUMN linkedin TEXT DEFAULT ''")
+	db.conn.Exec("ALTER TABLE campaign_recipients ADD COLUMN unsubscribed INTEGER DEFAULT 0")
+	db.conn.Exec("ALTER TABLE campaigns ADD COLUMN scheduled_at DATETIME")
+	db.conn.Exec("ALTER TABLE campaigns ADD COLUMN subject_b TEXT DEFAULT ''")
+	db.conn.Exec("ALTER TABLE campaigns ADD COLUMN body_b TEXT DEFAULT ''")
+	db.conn.Exec("ALTER TABLE campaigns ADD COLUMN is_ab_test INTEGER DEFAULT 0")
+	db.conn.Exec("ALTER TABLE campaign_recipients ADD COLUMN variant TEXT DEFAULT 'A'")
+	db.conn.Exec("ALTER TABLE campaign_recipients ADD COLUMN current_step INTEGER DEFAULT 1")
+	db.conn.Exec("ALTER TABLE campaign_recipients ADD COLUMN last_step_sent_at DATETIME")
+	db.conn.Exec("ALTER TABLE businesses ADD COLUMN pipeline_stage TEXT DEFAULT 'lead'")
+	db.conn.Exec(`CREATE TABLE IF NOT EXISTS campaign_steps (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		campaign_id INTEGER NOT NULL,
+		step_number INTEGER NOT NULL,
+		wait_days INTEGER NOT NULL DEFAULT 3,
+		subject TEXT NOT NULL,
+		body TEXT NOT NULL,
+		condition TEXT DEFAULT 'no_reply',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+	)`)
+	db.conn.Exec("CREATE TABLE IF NOT EXISTS unsubscribed_emails (email TEXT PRIMARY KEY, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)")
+	db.conn.Exec("INSERT OR IGNORE INTO users (id, email, password_hash, name) VALUES (1, 'admin@clientlist.local', 'default', 'Administrator')")
 
 	log.Println("Database migration complete")
 	return nil
@@ -151,9 +267,12 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) UpsertBusiness(biz models.Business, source, crawlID string) error {
+	if biz.EmailStatus == "" {
+		biz.EmailStatus = "unverified"
+	}
 	_, err := db.conn.Exec(`
-		INSERT INTO businesses (name, address, phone, website, email, facebook, country, city, latitude, longitude, rating, total_rating, place_id, category, opening_hours, source, crawl_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO businesses (name, address, phone, website, email, facebook, country, city, latitude, longitude, rating, total_rating, place_id, category, opening_hours, source, crawl_id, email_status, decision_maker, linkedin)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name, address) DO UPDATE SET
 			phone = COALESCE(NULLIF(excluded.phone, ''), businesses.phone),
 			website = COALESCE(NULLIF(excluded.website, ''), businesses.website),
@@ -162,12 +281,15 @@ func (db *DB) UpsertBusiness(biz models.Business, source, crawlID string) error 
 			rating = CASE WHEN excluded.rating > 0 THEN excluded.rating ELSE businesses.rating END,
 			total_rating = CASE WHEN excluded.total_rating > 0 THEN excluded.total_rating ELSE businesses.total_rating END,
 			category = COALESCE(NULLIF(excluded.category, ''), businesses.category),
-			opening_hours = COALESCE(NULLIF(excluded.opening_hours, ''), businesses.opening_hours)
+			opening_hours = COALESCE(NULLIF(excluded.opening_hours, ''), businesses.opening_hours),
+			email_status = COALESCE(NULLIF(excluded.email_status, ''), businesses.email_status),
+			decision_maker = COALESCE(NULLIF(excluded.decision_maker, ''), businesses.decision_maker),
+			linkedin = COALESCE(NULLIF(excluded.linkedin, ''), businesses.linkedin)
 	`,
 		biz.Name, biz.Address, biz.Phone, biz.Website, biz.Email, biz.Facebook,
 		biz.Country, extractCity(biz.Address), biz.Latitude, biz.Longitude,
 		biz.Rating, biz.TotalRating, biz.PlaceID, biz.Category, biz.Hours,
-		source, crawlID,
+		source, crawlID, biz.EmailStatus, biz.DecisionMaker, biz.LinkedIn,
 	)
 	return err
 }
@@ -196,6 +318,36 @@ func (db *DB) UpdateBusinessEmail(id int, email string) error {
 func (db *DB) UpdateBusinessWebsite(id int, website string) error {
 	_, err := db.conn.Exec("UPDATE businesses SET website = ? WHERE id = ?", website, id)
 	return err
+}
+
+func (db *DB) CreateBusiness(biz models.Business) (int64, error) {
+	if biz.EmailStatus == "" {
+		biz.EmailStatus = "unverified"
+	}
+	if biz.PipelineStage == "" {
+		biz.PipelineStage = "lead"
+	}
+	if biz.Source == "" {
+		biz.Source = "manual"
+	}
+	city := biz.City
+	if city == "" {
+		city = extractCity(biz.Address)
+	}
+
+	res, err := db.conn.Exec(`
+		INSERT INTO businesses (name, address, phone, website, email, facebook, country, city, latitude, longitude, rating, total_rating, place_id, category, opening_hours, source, email_status, decision_maker, linkedin, pipeline_stage)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		biz.Name, biz.Address, biz.Phone, biz.Website, biz.Email, biz.Facebook,
+		biz.Country, city, biz.Latitude, biz.Longitude,
+		biz.Rating, biz.TotalRating, biz.PlaceID, biz.Category, biz.Hours,
+		biz.Source, biz.EmailStatus, biz.DecisionMaker, biz.LinkedIn, biz.PipelineStage,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }
 
 func (db *DB) UpdateBusiness(id int, business models.Business) error {
@@ -256,10 +408,10 @@ func (db *DB) GetBusinessesByIDs(ids []int) ([]models.Business, error) {
 }
 
 func (db *DB) SearchBusinesses(query, city, category, source string, limit, offset int) ([]models.Business, int, error) {
-	return db.SearchBusinessesFiltered(query, city, category, source, "", "", "", "", limit, offset)
+	return db.SearchBusinessesFiltered(query, city, category, source, "", "", "", "", "", limit, offset)
 }
 
-func (db *DB) SearchBusinessesFiltered(query, city, category, source, country, hasEmail, hasPhone, hasWebsite string, limit, offset int) ([]models.Business, int, error) {
+func (db *DB) SearchBusinessesFiltered(query, city, category, source, country, hasEmail, hasPhone, hasWebsite, pipelineStage string, limit, offset int) ([]models.Business, int, error) {
 	where := "WHERE 1=1"
 	args := []interface{}{}
 
@@ -299,6 +451,14 @@ func (db *DB) SearchBusinessesFiltered(query, city, category, source, country, h
 	} else if hasWebsite == "0" {
 		where += " AND (website IS NULL OR website = '')"
 	}
+	if pipelineStage != "" {
+		if pipelineStage == "none" {
+			where += " AND (pipeline_stage IS NULL OR pipeline_stage = '' OR pipeline_stage = 'lead')"
+		} else {
+			where += " AND pipeline_stage = ?"
+			args = append(args, pipelineStage)
+		}
+	}
 
 	var total int
 	countArgs := make([]interface{}, len(args))
@@ -310,7 +470,8 @@ func (db *DB) SearchBusinessesFiltered(query, city, category, source, country, h
 
 	args = append(args, limit, offset)
 	rows, err := db.conn.Query(`
-		SELECT id, name, address, phone, website, email, facebook, country, city, latitude, longitude, rating, total_rating, place_id, category, opening_hours, source, created_at
+		SELECT id, name, address, phone, website, email, facebook, country, city, latitude, longitude, rating, total_rating, place_id, category, opening_hours, source, created_at,
+		COALESCE(email_status, 'unverified'), COALESCE(decision_maker, ''), COALESCE(linkedin, ''), COALESCE(pipeline_stage, 'lead')
 		FROM businesses `+where+`
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
@@ -325,7 +486,8 @@ func (db *DB) SearchBusinessesFiltered(query, city, category, source, country, h
 		var b models.Business
 		err := rows.Scan(&b.ID, &b.Name, &b.Address, &b.Phone, &b.Website, &b.Email, &b.Facebook,
 			&b.Country, &b.City, &b.Latitude, &b.Longitude, &b.Rating, &b.TotalRating,
-			&b.PlaceID, &b.Category, &b.Hours, &b.Source, &b.CreatedAt)
+			&b.PlaceID, &b.Category, &b.Hours, &b.Source, &b.CreatedAt,
+			&b.EmailStatus, &b.DecisionMaker, &b.LinkedIn, &b.PipelineStage)
 		if err != nil {
 			log.Printf("Scan error: %v", err)
 			continue
@@ -751,7 +913,8 @@ func (db *DB) GetBusinessesByCrawlID(crawlID string, limit, offset int) ([]model
 	}
 
 	rows, err := db.conn.Query(`
-		SELECT id, name, address, phone, website, email, facebook, country, city, latitude, longitude, rating, total_rating, place_id, category, opening_hours, source
+		SELECT id, name, address, phone, website, email, facebook, country, city, latitude, longitude, rating, total_rating, place_id, category, opening_hours, source,
+		       COALESCE(email_status, 'unverified'), COALESCE(decision_maker, ''), COALESCE(linkedin, ''), COALESCE(pipeline_stage, 'lead')
 		FROM businesses WHERE crawl_id = ?
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
@@ -767,11 +930,13 @@ func (db *DB) GetBusinessesByCrawlID(crawlID string, limit, offset int) ([]model
 		var city string
 		err := rows.Scan(&b.ID, &b.Name, &b.Address, &b.Phone, &b.Website, &b.Email, &b.Facebook,
 			&b.Country, &city, &b.Latitude, &b.Longitude, &b.Rating, &b.TotalRating,
-			&b.PlaceID, &b.Category, &b.Hours, &b.Source)
+			&b.PlaceID, &b.Category, &b.Hours, &b.Source,
+			&b.EmailStatus, &b.DecisionMaker, &b.LinkedIn, &b.PipelineStage)
 		if err != nil {
 			log.Printf("Scan error: %v", err)
 			continue
 		}
+		b.City = city
 		businesses = append(businesses, b)
 	}
 
@@ -849,10 +1014,18 @@ func isUselessWebsite(websiteURL string) bool {
 }
 
 func (db *DB) CreateCampaign(c models.Campaign) (int, error) {
+	status := c.Status
+	if status == "" {
+		if c.ScheduledAt != "" {
+			status = "scheduled"
+		} else {
+			status = "draft"
+		}
+	}
 	result, err := db.conn.Exec(`
-		INSERT INTO campaigns (name, subject, body, sender_email, status)
-		VALUES (?, ?, ?, ?, 'draft')
-	`, c.Name, c.Subject, c.Body, c.SenderEmail)
+		INSERT INTO campaigns (name, subject, body, sender_email, status, scheduled_at, subject_b, body_b, is_ab_test)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, c.Name, c.Subject, c.Body, c.SenderEmail, status, c.ScheduledAt, c.SubjectB, c.BodyB, c.IsABTest)
 	if err != nil {
 		return 0, err
 	}
@@ -862,7 +1035,8 @@ func (db *DB) CreateCampaign(c models.Campaign) (int, error) {
 
 func (db *DB) GetCampaigns() ([]models.Campaign, error) {
 	rows, err := db.conn.Query(`
-		SELECT id, name, subject, body, sender_email, status, sent_count, opened_count, clicked_count, created_at
+		SELECT id, name, subject, body, sender_email, status, sent_count, opened_count, clicked_count, created_at, COALESCE(scheduled_at, ''),
+		       COALESCE(subject_b, ''), COALESCE(body_b, ''), COALESCE(is_ab_test, 0)
 		FROM campaigns ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -873,7 +1047,8 @@ func (db *DB) GetCampaigns() ([]models.Campaign, error) {
 	var campaigns []models.Campaign
 	for rows.Next() {
 		var c models.Campaign
-		err := rows.Scan(&c.ID, &c.Name, &c.Subject, &c.Body, &c.SenderEmail, &c.Status, &c.SentCount, &c.OpenedCount, &c.ClickedCount, &c.CreatedAt)
+		err := rows.Scan(&c.ID, &c.Name, &c.Subject, &c.Body, &c.SenderEmail, &c.Status, &c.SentCount, &c.OpenedCount, &c.ClickedCount, &c.CreatedAt, &c.ScheduledAt,
+			&c.SubjectB, &c.BodyB, &c.IsABTest)
 		if err != nil {
 			continue
 		}
@@ -885,10 +1060,139 @@ func (db *DB) GetCampaigns() ([]models.Campaign, error) {
 func (db *DB) GetCampaign(id int) (models.Campaign, error) {
 	var c models.Campaign
 	err := db.conn.QueryRow(`
-		SELECT id, name, subject, body, sender_email, status, sent_count, opened_count, clicked_count, created_at
+		SELECT id, name, subject, body, sender_email, status, sent_count, opened_count, clicked_count, created_at, COALESCE(scheduled_at, ''),
+		       COALESCE(subject_b, ''), COALESCE(body_b, ''), COALESCE(is_ab_test, 0)
 		FROM campaigns WHERE id = ?
-	`, id).Scan(&c.ID, &c.Name, &c.Subject, &c.Body, &c.SenderEmail, &c.Status, &c.SentCount, &c.OpenedCount, &c.ClickedCount, &c.CreatedAt)
+	`, id).Scan(&c.ID, &c.Name, &c.Subject, &c.Body, &c.SenderEmail, &c.Status, &c.SentCount, &c.OpenedCount, &c.ClickedCount, &c.CreatedAt, &c.ScheduledAt,
+		&c.SubjectB, &c.BodyB, &c.IsABTest)
 	return c, err
+}
+
+func (db *DB) GetDueScheduledCampaigns() ([]models.Campaign, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, name, subject, body, sender_email, status, sent_count, opened_count, clicked_count, created_at, COALESCE(scheduled_at, ''),
+		       COALESCE(subject_b, ''), COALESCE(body_b, ''), COALESCE(is_ab_test, 0)
+		FROM campaigns 
+		WHERE status = 'scheduled' AND scheduled_at != '' 
+		  AND (scheduled_at <= datetime('now', 'localtime') OR scheduled_at <= CURRENT_TIMESTAMP)
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var campaigns []models.Campaign
+	for rows.Next() {
+		var c models.Campaign
+		err := rows.Scan(&c.ID, &c.Name, &c.Subject, &c.Body, &c.SenderEmail, &c.Status, &c.SentCount, &c.OpenedCount, &c.ClickedCount, &c.CreatedAt, &c.ScheduledAt,
+			&c.SubjectB, &c.BodyB, &c.IsABTest)
+		if err == nil {
+			campaigns = append(campaigns, c)
+		}
+	}
+	return campaigns, nil
+}
+
+func (db *DB) UpdateBusinessPipelineStage(id int, stage string) error {
+	_, err := db.conn.Exec("UPDATE businesses SET pipeline_stage = ? WHERE id = ?", stage, id)
+	return err
+}
+
+func (db *DB) CreateCampaignStep(step models.CampaignStep) (models.CampaignStep, error) {
+	if step.WaitDays <= 0 && step.DelayDays > 0 {
+		step.WaitDays = step.DelayDays
+	}
+	if step.WaitDays <= 0 {
+		step.WaitDays = 3
+	}
+	step.DelayDays = step.WaitDays
+	if step.Condition == "" {
+		step.Condition = "no_reply"
+	}
+	if step.StepNumber <= 0 {
+		var count int
+		db.conn.QueryRow("SELECT COUNT(*) FROM campaign_steps WHERE campaign_id = ?", step.CampaignID).Scan(&count)
+		step.StepNumber = count + 1
+	}
+
+	res, err := db.conn.Exec(`
+		INSERT INTO campaign_steps (campaign_id, step_number, wait_days, subject, body, condition)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, step.CampaignID, step.StepNumber, step.WaitDays, step.Subject, step.Body, step.Condition)
+	if err != nil {
+		return step, err
+	}
+	id, _ := res.LastInsertId()
+	step.ID = int(id)
+	return step, nil
+}
+
+func (db *DB) DeleteCampaignStep(stepID, campaignID int) error {
+	_, err := db.conn.Exec("DELETE FROM campaign_steps WHERE id = ? AND campaign_id = ?", stepID, campaignID)
+	return err
+}
+
+func (db *DB) GetCampaignSteps(campaignID int) ([]models.CampaignStep, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, campaign_id, step_number, wait_days, subject, body, condition, created_at
+		FROM campaign_steps WHERE campaign_id = ? ORDER BY step_number ASC
+	`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var steps []models.CampaignStep
+	for rows.Next() {
+		var s models.CampaignStep
+		if err := rows.Scan(&s.ID, &s.CampaignID, &s.StepNumber, &s.WaitDays, &s.Subject, &s.Body, &s.Condition, &s.CreatedAt); err == nil {
+			s.DelayDays = s.WaitDays
+			steps = append(steps, s)
+		}
+	}
+	return steps, nil
+}
+
+func (db *DB) GetABTestStats(campaignID int) (map[string]interface{}, error) {
+	var sentA, openedA, clickedA, sentB, openedB, clickedB int
+	db.conn.QueryRow(`
+		SELECT 
+			COALESCE(COUNT(CASE WHEN variant = 'A' AND sent_at IS NOT NULL THEN 1 END), 0),
+			COALESCE(COUNT(CASE WHEN variant = 'A' AND (opened_at IS NOT NULL OR clicked_at IS NOT NULL) THEN 1 END), 0),
+			COALESCE(COUNT(CASE WHEN variant = 'A' AND clicked_at IS NOT NULL THEN 1 END), 0),
+			COALESCE(COUNT(CASE WHEN variant = 'B' AND sent_at IS NOT NULL THEN 1 END), 0),
+			COALESCE(COUNT(CASE WHEN variant = 'B' AND (opened_at IS NOT NULL OR clicked_at IS NOT NULL) THEN 1 END), 0),
+			COALESCE(COUNT(CASE WHEN variant = 'B' AND clicked_at IS NOT NULL THEN 1 END), 0)
+		FROM campaign_recipients WHERE campaign_id = ?
+	`, campaignID).Scan(&sentA, &openedA, &clickedA, &sentB, &openedB, &clickedB)
+
+	openRateA := 0.0
+	if sentA > 0 {
+		openRateA = float64(openedA) / float64(sentA) * 100
+	}
+	openRateB := 0.0
+	if sentB > 0 {
+		openRateB = float64(openedB) / float64(sentB) * 100
+	}
+
+	winner := "Tie / Ongoing"
+	if sentA > 0 || sentB > 0 {
+		if openRateA > openRateB {
+			winner = "Variant A is leading"
+		} else if openRateB > openRateA {
+			winner = "Variant B is leading"
+		}
+	}
+
+	return map[string]interface{}{
+		"variant_a": map[string]interface{}{
+			"sent": sentA, "opened": openedA, "clicked": clickedA, "open_rate": openRateA,
+		},
+		"variant_b": map[string]interface{}{
+			"sent": sentB, "opened": openedB, "clicked": clickedB, "open_rate": openRateB,
+		},
+		"winner": winner,
+	}, nil
 }
 
 func (db *DB) UpdateCampaignStatus(id int, status string) error {
@@ -899,12 +1203,86 @@ func (db *DB) UpdateCampaignStatus(id int, status string) error {
 func (db *DB) UpdateCampaignStats(id int) error {
 	_, err := db.conn.Exec(`
 		UPDATE campaigns SET
-			sent_count = (SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ?),
-			opened_count = (SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ? AND opened_at IS NOT NULL),
+			sent_count = (SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ? AND sent_at IS NOT NULL),
+			opened_count = (SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ? AND (opened_at IS NOT NULL OR clicked_at IS NOT NULL)),
 			clicked_count = (SELECT COUNT(*) FROM campaign_recipients WHERE campaign_id = ? AND clicked_at IS NOT NULL)
 		WHERE id = ?
 	`, id, id, id, id)
 	return err
+}
+
+func (db *DB) UpdateRecipientSent(id int) error {
+	_, err := db.conn.Exec("UPDATE campaign_recipients SET sent_at = CURRENT_TIMESTAMP, last_step_sent_at = CURRENT_TIMESTAMP, current_step = 1 WHERE id = ?", id)
+	return err
+}
+
+func (db *DB) UpdateRecipientStepSent(id int, stepNumber int) error {
+	_, err := db.conn.Exec("UPDATE campaign_recipients SET last_step_sent_at = CURRENT_TIMESTAMP, current_step = ? WHERE id = ?", stepNumber, id)
+	return err
+}
+
+func (db *DB) GetRolling24HourSentCount() (int, error) {
+	var count int
+	err := db.conn.QueryRow("SELECT COUNT(*) FROM campaign_recipients WHERE sent_at >= datetime('now', '-24 hours')").Scan(&count)
+	return count, err
+}
+
+type DueFollowUpRecipient struct {
+	RecipientID   int
+	CampaignID    int
+	BusinessID    int
+	Email         string
+	OpenToken     string
+	ClickToken    string
+	CurrentStep   int
+	StepID        int
+	StepNumber    int
+	WaitDays      int
+	Subject       string
+	Body          string
+	Condition     string
+	CampaignName  string
+	SenderEmail   string
+	BizName       string
+	BizCategory   string
+	BizCity       string
+	BizCountry    string
+}
+
+func (db *DB) GetDueFollowUpRecipients() ([]DueFollowUpRecipient, error) {
+	rows, err := db.conn.Query(`
+		SELECT r.id, r.campaign_id, r.business_id, r.email, r.open_token, r.click_token, r.current_step,
+		       s.id, s.step_number, s.wait_days, s.subject, s.body, s.condition,
+		       c.name, c.sender_email,
+		       COALESCE(b.name, ''), COALESCE(b.category, ''), COALESCE(b.city, ''), COALESCE(b.country, '')
+		FROM campaign_recipients r
+		JOIN campaigns c ON c.id = r.campaign_id
+		JOIN campaign_steps s ON s.campaign_id = r.campaign_id AND s.step_number = (r.current_step + 1)
+		LEFT JOIN businesses b ON b.id = r.business_id
+		WHERE r.sent_at IS NOT NULL
+		  AND r.last_step_sent_at IS NOT NULL
+		  AND datetime(r.last_step_sent_at, '+' || s.wait_days || ' days') <= datetime('now')
+		  AND (s.condition != 'no_click' OR r.clicked_at IS NULL)
+		LIMIT 100
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []DueFollowUpRecipient
+	for rows.Next() {
+		var item DueFollowUpRecipient
+		if err := rows.Scan(
+			&item.RecipientID, &item.CampaignID, &item.BusinessID, &item.Email, &item.OpenToken, &item.ClickToken, &item.CurrentStep,
+			&item.StepID, &item.StepNumber, &item.WaitDays, &item.Subject, &item.Body, &item.Condition,
+			&item.CampaignName, &item.SenderEmail,
+			&item.BizName, &item.BizCategory, &item.BizCity, &item.BizCountry,
+		); err == nil {
+			list = append(list, item)
+		}
+	}
+	return list, nil
 }
 
 func (db *DB) DeleteCampaign(id int) error {
@@ -924,8 +1302,8 @@ func (db *DB) AddRecipients(campaignID int, recipients []models.CampaignRecipien
 	defer tx.Rollback()
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO campaign_recipients (campaign_id, business_id, email, open_token, click_token)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO campaign_recipients (campaign_id, business_id, email, open_token, click_token, variant)
+		VALUES (?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -933,7 +1311,11 @@ func (db *DB) AddRecipients(campaignID int, recipients []models.CampaignRecipien
 	defer stmt.Close()
 
 	for _, r := range recipients {
-		_, err := stmt.Exec(campaignID, r.BusinessID, r.Email, r.OpenToken, r.ClickToken)
+		variant := r.Variant
+		if variant == "" {
+			variant = "A"
+		}
+		_, err := stmt.Exec(campaignID, r.BusinessID, r.Email, r.OpenToken, r.ClickToken, variant)
 		if err != nil {
 			return err
 		}
@@ -950,9 +1332,11 @@ func (db *DB) GetRecipientsByCampaign(campaignID int, limit, offset int) ([]mode
 	}
 
 	rows, err := db.conn.Query(`
-		SELECT id, campaign_id, business_id, email, sent_at, opened_at, clicked_at, open_token, click_token
+		SELECT id, campaign_id, business_id, email,
+		       COALESCE(sent_at, ''), COALESCE(opened_at, ''), COALESCE(clicked_at, ''),
+		       COALESCE(open_token, ''), COALESCE(click_token, ''), COALESCE(variant, 'A')
 		FROM campaign_recipients WHERE campaign_id = ?
-		ORDER BY sent_at DESC LIMIT ? OFFSET ?
+		ORDER BY id DESC LIMIT ? OFFSET ?
 	`, campaignID, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -962,8 +1346,9 @@ func (db *DB) GetRecipientsByCampaign(campaignID int, limit, offset int) ([]mode
 	var recipients []models.CampaignRecipient
 	for rows.Next() {
 		var r models.CampaignRecipient
-		err := rows.Scan(&r.ID, &r.CampaignID, &r.BusinessID, &r.Email, &r.SentAt, &r.OpenedAt, &r.ClickedAt, &r.OpenToken, &r.ClickToken)
+		err := rows.Scan(&r.ID, &r.CampaignID, &r.BusinessID, &r.Email, &r.SentAt, &r.OpenedAt, &r.ClickedAt, &r.OpenToken, &r.ClickToken, &r.Variant)
 		if err != nil {
+			log.Printf("Scan recipient error: %v", err)
 			continue
 		}
 		recipients = append(recipients, r)
@@ -975,7 +1360,8 @@ func (db *DB) GetRecipientsByCampaign(campaignID int, limit, offset int) ([]mode
 func (db *DB) GetRecipientsWithBusinessByCampaign(campaignID int) ([]models.CampaignRecipientWithBusiness, error) {
 	rows, err := db.conn.Query(`
 		SELECT cr.id, cr.campaign_id, cr.business_id, cr.email, cr.open_token, cr.click_token,
-			   COALESCE(b.name, '') as name, COALESCE(b.category, '') as category, COALESCE(b.city, '') as city, COALESCE(b.country, '') as country
+			   COALESCE(b.name, '') as name, COALESCE(b.category, '') as category, COALESCE(b.city, '') as city, COALESCE(b.country, '') as country,
+			   COALESCE(cr.variant, 'A') as variant
 		FROM campaign_recipients cr
 		LEFT JOIN businesses b ON cr.business_id = b.id
 		WHERE cr.campaign_id = ?
@@ -988,7 +1374,7 @@ func (db *DB) GetRecipientsWithBusinessByCampaign(campaignID int) ([]models.Camp
 	var recipients []models.CampaignRecipientWithBusiness
 	for rows.Next() {
 		var r models.CampaignRecipientWithBusiness
-		err := rows.Scan(&r.ID, &r.CampaignID, &r.BusinessID, &r.Email, &r.OpenToken, &r.ClickToken, &r.Name, &r.Category, &r.City, &r.Country)
+		err := rows.Scan(&r.ID, &r.CampaignID, &r.BusinessID, &r.Email, &r.OpenToken, &r.ClickToken, &r.Name, &r.Category, &r.City, &r.Country, &r.Variant)
 		if err != nil {
 			continue
 		}
@@ -1004,7 +1390,12 @@ func (db *DB) UpdateRecipientOpen(token string) error {
 }
 
 func (db *DB) UpdateRecipientClick(token string) error {
-	_, err := db.conn.Exec("UPDATE campaign_recipients SET clicked_at = CURRENT_TIMESTAMP WHERE click_token = ? AND clicked_at IS NULL", token)
+	_, err := db.conn.Exec(`
+		UPDATE campaign_recipients 
+		SET clicked_at = CURRENT_TIMESTAMP,
+		    opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP)
+		WHERE click_token = ? AND clicked_at IS NULL
+	`, token)
 	return err
 }
 
@@ -1013,7 +1404,7 @@ func (db *DB) GetCampaignStats(campaignID int) (models.CampaignStats, error) {
 	err := db.conn.QueryRow(`
 		SELECT
 			COUNT(*) as sent,
-			SUM(CASE WHEN opened_at IS NOT NULL THEN 1 ELSE 0 END) as opened,
+			SUM(CASE WHEN opened_at IS NOT NULL OR clicked_at IS NOT NULL THEN 1 ELSE 0 END) as opened,
 			SUM(CASE WHEN clicked_at IS NOT NULL THEN 1 ELSE 0 END) as clicked
 		FROM campaign_recipients WHERE campaign_id = ?
 	`, campaignID).Scan(&stats.Sent, &stats.Opened, &stats.Clicked)
@@ -1160,4 +1551,541 @@ func (db *DB) SetSettings(settings map[string]string) error {
 	}
 
 	return tx.Commit()
+}
+
+// === Subscriptions ===
+
+func (db *DB) GetSubscription(userID int) (map[string]interface{}, error) {
+	row := db.conn.QueryRow("SELECT id, user_id, plan, stripe_customer_id, stripe_subscription_id, status, emails_limit, emails_sent, contacts_limit, period_start, period_end FROM subscriptions WHERE user_id = ?", userID)
+	var id, uid, emailsLimit, emailsSent, contactsLimit int
+	var plan, stripeCustomer, stripeSub, status string
+	var periodStart, periodEnd sql.NullString
+	err := row.Scan(&id, &uid, &plan, &stripeCustomer, &stripeSub, &status, &emailsLimit, &emailsSent, &contactsLimit, &periodStart, &periodEnd)
+	if err != nil {
+		return map[string]interface{}{
+			"plan": "free", "status": "active", "emails_limit": 100, "emails_sent": 0, "contacts_limit": 500,
+		}, nil
+	}
+	sub := map[string]interface{}{
+		"id": id, "user_id": uid, "plan": plan, "stripe_customer_id": stripeCustomer,
+		"stripe_subscription_id": stripeSub, "status": status, "emails_limit": emailsLimit,
+		"emails_sent": emailsSent, "contacts_limit": contactsLimit,
+	}
+	if periodStart.Valid {
+		sub["period_start"] = periodStart.String
+	}
+	if periodEnd.Valid {
+		sub["period_end"] = periodEnd.String
+	}
+	return sub, nil
+}
+
+func (db *DB) CreateOrUpdateSubscription(userID int, plan, stripeCustomer, stripeSub string, emailsLimit, contactsLimit int) error {
+	db.conn.Exec("DELETE FROM subscriptions WHERE user_id = ?", userID)
+	_, err := db.conn.Exec(`
+		INSERT INTO subscriptions (user_id, plan, stripe_customer_id, stripe_subscription_id, status, emails_limit, contacts_limit, period_start, period_end)
+		VALUES (?, ?, ?, ?, 'active', ?, ?, CURRENT_TIMESTAMP, datetime(CURRENT_TIMESTAMP, '+1 month'))
+	`, userID, plan, stripeCustomer, stripeSub, emailsLimit, contactsLimit)
+	return err
+}
+
+func (db *DB) IncrementEmailsSent(userID int) error {
+	_, err := db.conn.Exec("UPDATE subscriptions SET emails_sent = emails_sent + 1 WHERE user_id = ?", userID)
+	return err
+}
+
+func (db *DB) CanSendEmail(userID int) bool {
+	var emailsSent, emailsLimit int
+	err := db.conn.QueryRow("SELECT COALESCE(emails_sent, 0), COALESCE(emails_limit, 100) FROM subscriptions WHERE user_id = ?", userID).Scan(&emailsSent, &emailsLimit)
+	if err != nil {
+		return true
+	}
+	return emailsSent < emailsLimit
+}
+
+// === Teams ===
+
+func (db *DB) CreateTeam(name string, ownerID int) (int, error) {
+	result, err := db.conn.Exec("INSERT INTO teams (name, owner_id) VALUES (?, ?)", name, ownerID)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := result.LastInsertId()
+	_, err = db.conn.Exec("INSERT INTO team_members (team_id, user_id, role, accepted_at) VALUES (?, ?, 'owner', CURRENT_TIMESTAMP)", id, ownerID)
+	return int(id), err
+}
+
+func (db *DB) GetTeamsForUser(userID int) ([]map[string]interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT t.id, t.name, t.owner_id, t.plan, tm.role
+		FROM teams t JOIN team_members tm ON t.id = tm.team_id
+		WHERE tm.user_id = ? AND tm.accepted_at IS NOT NULL
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var teams []map[string]interface{}
+	for rows.Next() {
+		var id, ownerID int
+		var name, plan, role string
+		rows.Scan(&id, &name, &ownerID, &plan, &role)
+		teams = append(teams, map[string]interface{}{
+			"id": id, "name": name, "owner_id": ownerID, "plan": plan, "role": role,
+		})
+	}
+	return teams, nil
+}
+
+func (db *DB) GetTeamMembers(teamID int) ([]map[string]interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT u.id, u.name, u.email, tm.role, tm.invited_at, tm.accepted_at
+		FROM team_members tm JOIN users u ON tm.user_id = u.id
+		WHERE tm.team_id = ?
+	`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var members []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var name, email, role string
+		var invitedAt, acceptedAt sql.NullString
+		rows.Scan(&id, &name, &email, &role, &invitedAt, &acceptedAt)
+		m := map[string]interface{}{
+			"id": id, "name": name, "email": email, "role": role,
+		}
+		if acceptedAt.Valid {
+			m["status"] = "active"
+		} else {
+			m["status"] = "invited"
+		}
+		members = append(members, m)
+	}
+	return members, nil
+}
+
+func (db *DB) InviteTeamMember(teamID int, email string) (int, error) {
+	var userID int
+	err := db.conn.QueryRow("SELECT id FROM users WHERE email = ?", email).Scan(&userID)
+	if err != nil {
+		return 0, fmt.Errorf("user not found with email %s", email)
+	}
+	result, err := db.conn.Exec(`
+		INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'member')
+		ON CONFLICT(team_id, user_id) DO NOTHING
+	`, teamID, userID)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := result.LastInsertId()
+	return int(id), nil
+}
+
+func (db *DB) RemoveTeamMember(teamID, userID int) error {
+	_, err := db.conn.Exec("DELETE FROM team_members WHERE team_id = ? AND user_id = ? AND role != 'owner'", teamID, userID)
+	return err
+}
+
+func (db *DB) GetUserTeamID(userID int) int {
+	var teamID int
+	db.conn.QueryRow("SELECT team_id FROM team_members WHERE user_id = ? AND accepted_at IS NOT NULL LIMIT 1", userID).Scan(&teamID)
+	return teamID
+}
+
+// === Email Templates ===
+
+func (db *DB) GetEmailTemplates(userID int) ([]map[string]interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, name, subject, body, category, is_public, created_at
+		FROM email_templates WHERE user_id = ? OR is_public = 1
+		ORDER BY created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var templates []map[string]interface{}
+	for rows.Next() {
+		var id, isPublic int
+		var name, subject, body, category, createdAt string
+		rows.Scan(&id, &name, &subject, &body, &category, &isPublic, &createdAt)
+		templates = append(templates, map[string]interface{}{
+			"id": id, "name": name, "subject": subject, "body": body,
+			"category": category, "is_public": isPublic, "created_at": createdAt,
+		})
+	}
+	return templates, nil
+}
+
+func (db *DB) CreateEmailTemplate(userID int, name, subject, body, category string, isPublic bool) (int, error) {
+	public := 0
+	if isPublic {
+		public = 1
+	}
+	result, err := db.conn.Exec(`
+		INSERT INTO email_templates (user_id, name, subject, body, category, is_public) VALUES (?, ?, ?, ?, ?, ?)
+	`, userID, name, subject, body, category, public)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := result.LastInsertId()
+	return int(id), nil
+}
+
+func (db *DB) UpdateEmailTemplate(id, userID int, name, subject, body, category string) error {
+	_, err := db.conn.Exec(`
+		UPDATE email_templates SET name=?, subject=?, body=?, category=?, updated_at=CURRENT_TIMESTAMP
+		WHERE id=? AND user_id=?
+	`, name, subject, body, category, id, userID)
+	return err
+}
+
+func (db *DB) DeleteEmailTemplate(id, userID int) error {
+	_, err := db.conn.Exec("DELETE FROM email_templates WHERE id=? AND user_id=?", id, userID)
+	return err
+}
+
+func (db *DB) GetEmailTemplateByID(id int) (map[string]interface{}, error) {
+	var isPublic int
+	var name, subject, body, category, createdAt string
+	err := db.conn.QueryRow(`
+		SELECT id, name, subject, body, category, is_public, created_at
+		FROM email_templates WHERE id = ?
+	`, id).Scan(&id, &name, &subject, &body, &category, &isPublic, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"id": id, "name": name, "subject": subject, "body": body,
+		"category": category, "is_public": isPublic, "created_at": createdAt,
+	}, nil
+}
+
+// === Landing Pages ===
+
+func (db *DB) GetLandingPages(userID int) ([]map[string]interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, title, slug, subheadline, theme, published, views, submissions, created_at
+		FROM landing_pages WHERE user_id = ? ORDER BY created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var pages []map[string]interface{}
+	for rows.Next() {
+		var id, published, views, submissions int
+		var title, slug, theme, createdAt string
+		var subheadline sql.NullString
+		rows.Scan(&id, &title, &slug, &subheadline, &theme, &published, &views, &submissions, &createdAt)
+		p := map[string]interface{}{
+			"id": id, "title": title, "slug": slug, "theme": theme,
+			"published": published, "views": views, "submissions": submissions, "created_at": createdAt,
+		}
+		if subheadline.Valid {
+			p["subheadline"] = subheadline.String
+		}
+		pages = append(pages, p)
+	}
+	return pages, nil
+}
+
+func (db *DB) GetLandingPageBySlug(slug string) (map[string]interface{}, error) {
+	var id, userID, published, views, submissions int
+	var title, slugVal, theme, createdAt string
+	var subheadline, description, formFields, settings sql.NullString
+	err := db.conn.QueryRow(`
+		SELECT id, user_id, title, slug, subheadline, description, form_fields, theme, settings, published, views, submissions, created_at
+		FROM landing_pages WHERE slug = ?
+	`, slug).Scan(&id, &userID, &title, &slugVal, &subheadline, &description, &formFields, &theme, &settings, &published, &views, &submissions, &createdAt)
+	if err != nil {
+		return nil, err
+	}
+	p := map[string]interface{}{
+		"id": id, "user_id": userID, "title": title, "slug": slugVal, "theme": theme,
+		"published": published, "views": views, "submissions": submissions, "created_at": createdAt,
+	}
+	if subheadline.Valid {
+		p["subheadline"] = subheadline.String
+	}
+	if description.Valid {
+		p["description"] = description.String
+	}
+	if formFields.Valid {
+		p["form_fields"] = formFields.String
+	}
+	if settings.Valid {
+		p["settings"] = settings.String
+	}
+	return p, nil
+}
+
+func (db *DB) CreateLandingPage(userID int, title, slug, subheadline, description, formFields, theme, settings string) (int, error) {
+	result, err := db.conn.Exec(`
+		INSERT INTO landing_pages (user_id, title, slug, subheadline, description, form_fields, theme, settings)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, userID, title, slug, subheadline, description, formFields, theme, settings)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := result.LastInsertId()
+	return int(id), nil
+}
+
+func (db *DB) UpdateLandingPage(id, userID int, title, subheadline, description, formFields, theme, settings string, published bool) error {
+	pub := 0
+	if published {
+		pub = 1
+	}
+	_, err := db.conn.Exec(`
+		UPDATE landing_pages SET title=?, subheadline=?, description=?, form_fields=?, theme=?, settings=?, published=?, updated_at=CURRENT_TIMESTAMP
+		WHERE id=? AND user_id=?
+	`, title, subheadline, description, formFields, theme, settings, pub, id, userID)
+	return err
+}
+
+func (db *DB) DeleteLandingPage(id, userID int) error {
+	_, err := db.conn.Exec("DELETE FROM landing_pages WHERE id=? AND user_id=?", id, userID)
+	return err
+}
+
+func (db *DB) SetLandingPageStatus(id int, status string) error {
+	pub := 0
+	if status == "published" {
+		pub = 1
+	}
+	_, err := db.conn.Exec("UPDATE landing_pages SET published = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", pub, id)
+	return err
+}
+
+func (db *DB) IncrementLandingPageViews(slug string) error {
+	_, err := db.conn.Exec("UPDATE landing_pages SET views = views + 1 WHERE slug = ?", slug)
+	return err
+}
+
+func (db *DB) AddLandingPageSubmission(pageID int, data, ipAddress string) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec("INSERT INTO landing_page_submissions (page_id, data, ip_address) VALUES (?, ?, ?)", pageID, data, ipAddress)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec("UPDATE landing_pages SET submissions = submissions + 1 WHERE id = ?", pageID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (db *DB) GetLandingPageSubmissions(pageID, userID int) ([]map[string]interface{}, error) {
+	var check int
+	err := db.conn.QueryRow("SELECT user_id FROM landing_pages WHERE id = ?", pageID).Scan(&check)
+	if err != nil || check != userID {
+		return nil, fmt.Errorf("not found")
+	}
+	rows, err := db.conn.Query("SELECT id, data, ip_address, created_at FROM landing_page_submissions WHERE page_id = ? ORDER BY created_at DESC", pageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var subs []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var data, ipAddress, createdAt string
+		rows.Scan(&id, &data, &ipAddress, &createdAt)
+		subs = append(subs, map[string]interface{}{
+			"id": id, "data": data, "ip_address": ipAddress, "created_at": createdAt,
+		})
+	}
+	return subs, nil
+}
+
+// === Webhooks ===
+
+func (db *DB) GetWebhooks(userID int) ([]map[string]interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, name, url, events, secret, active, last_triggered, last_status, created_at
+		FROM webhooks WHERE user_id = ? ORDER BY created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hooks []map[string]interface{}
+	for rows.Next() {
+		var id, active int
+		var name, url, events string
+		var secret sql.NullString
+		var lastTriggered sql.NullString
+		var lastStatus sql.NullInt64
+		var createdAt string
+		rows.Scan(&id, &name, &url, &events, &secret, &active, &lastTriggered, &lastStatus, &createdAt)
+		h := map[string]interface{}{
+			"id": id, "name": name, "url": url, "events": events,
+			"active": active, "created_at": createdAt,
+		}
+		if secret.Valid {
+			h["secret"] = secret.String
+		}
+		if lastTriggered.Valid {
+			h["last_triggered"] = lastTriggered.String
+		}
+		if lastStatus.Valid {
+			h["last_status"] = lastStatus.Int64
+		}
+		hooks = append(hooks, h)
+	}
+	return hooks, nil
+}
+
+func (db *DB) CreateWebhook(userID int, name, url, events, secret string) (int, error) {
+	result, err := db.conn.Exec(`
+		INSERT INTO webhooks (user_id, name, url, events, secret) VALUES (?, ?, ?, ?, ?)
+	`, userID, name, url, events, secret)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := result.LastInsertId()
+	return int(id), nil
+}
+
+func (db *DB) UpdateWebhook(id, userID int, name, url, events string, active bool) error {
+	act := 0
+	if active {
+		act = 1
+	}
+	_, err := db.conn.Exec(`
+		UPDATE webhooks SET name=?, url=?, events=?, active=? WHERE id=? AND user_id=?
+	`, name, url, events, act, id, userID)
+	return err
+}
+
+func (db *DB) DeleteWebhook(id, userID int) error {
+	_, err := db.conn.Exec("DELETE FROM webhooks WHERE id=? AND user_id=?", id, userID)
+	return err
+}
+
+func (db *DB) GetWebhookByID(id, userID int) (map[string]interface{}, error) {
+	var name, url, events string
+	var secret sql.NullString
+	err := db.conn.QueryRow("SELECT name, url, events, secret FROM webhooks WHERE id = ? AND user_id = ?", id, userID).Scan(&name, &url, &events, &secret)
+	if err != nil {
+		return nil, err
+	}
+	res := map[string]interface{}{
+		"id": id, "name": name, "url": url, "events": events,
+	}
+	if secret.Valid {
+		res["secret"] = secret.String
+	}
+	return res, nil
+}
+
+func (db *DB) GetActiveWebhooksForEvent(userID int, event string) ([]map[string]interface{}, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, url, secret FROM webhooks WHERE user_id = ? AND active = 1
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var hooks []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var url string
+		var secret sql.NullString
+		rows.Scan(&id, &url, &secret)
+		h := map[string]interface{}{"id": id, "url": url}
+		if secret.Valid {
+			h["secret"] = secret.String
+		}
+		hooks = append(hooks, h)
+	}
+	return hooks, nil
+}
+
+func (db *DB) UpdateWebhookStatus(id int, status int) error {
+	_, err := db.conn.Exec("UPDATE webhooks SET last_triggered = CURRENT_TIMESTAMP, last_status = ? WHERE id = ?", status, id)
+	return err
+}
+
+// === Email Verification & Compliance ===
+
+func (db *DB) UpdateBusinessEmailStatus(id int, status string) error {
+	_, err := db.conn.Exec("UPDATE businesses SET email_status = ? WHERE id = ?", status, id)
+	return err
+}
+
+func (db *DB) BatchUpdateBusinessEmailStatus(statuses map[int]string) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("UPDATE businesses SET email_status = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for id, status := range statuses {
+		if _, err := stmt.Exec(status, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (db *DB) UpdateBusinessDecisionMaker(id int, decisionMaker, linkedin string) error {
+	_, err := db.conn.Exec("UPDATE businesses SET decision_maker = ?, linkedin = ? WHERE id = ?", decisionMaker, linkedin, id)
+	return err
+}
+
+func (db *DB) GetBusinessesWithUnverifiedEmail(limit int) ([]models.Business, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := db.conn.Query(`
+		SELECT id, name, email FROM businesses
+		WHERE email IS NOT NULL AND email != '' AND (email_status IS NULL OR email_status = 'unverified')
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var businesses []models.Business
+	for rows.Next() {
+		var b models.Business
+		if err := rows.Scan(&b.ID, &b.Name, &b.Email); err == nil {
+			businesses = append(businesses, b)
+		}
+	}
+	return businesses, nil
+}
+
+func (db *DB) IsEmailUnsubscribed(email string) bool {
+	var count int
+	clean := strings.ToLower(strings.TrimSpace(email))
+	db.conn.QueryRow("SELECT COUNT(*) FROM unsubscribed_emails WHERE LOWER(email) = ?", clean).Scan(&count)
+	return count > 0
+}
+
+func (db *DB) UnsubscribeEmail(email string) error {
+	clean := strings.ToLower(strings.TrimSpace(email))
+	_, err := db.conn.Exec("INSERT OR IGNORE INTO unsubscribed_emails (email) VALUES (?)", clean)
+	return err
+}
+
+func (db *DB) GetEmailByToken(token string) string {
+	var email string
+	db.conn.QueryRow("SELECT email FROM campaign_recipients WHERE open_token = ? OR click_token = ?", token, token).Scan(&email)
+	return email
 }

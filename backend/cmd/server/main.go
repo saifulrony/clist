@@ -76,15 +76,67 @@ func main() {
 	mux.HandleFunc("/api/business/delete-batch", handler.DeleteBusinesses)
 	mux.HandleFunc("/api/business/enrich-emails", handler.EnrichEmails)
 	mux.HandleFunc("/api/business/clean-websites", handler.CleanUselessWebsites)
+	mux.HandleFunc("/api/business/create", handler.CreateBusiness)
 	mux.HandleFunc("/api/business/update", handler.UpdateBusiness)
+	mux.HandleFunc("/api/business/verify-emails", handler.VerifyEmails)
+	mux.HandleFunc("/api/business/verify-email", handler.VerifySingleEmail)
+	mux.HandleFunc("/api/business/pipeline", handler.UpdateBusinessPipelineStageHandler)
 
 	// Campaign endpoints
+	mux.HandleFunc("/api/campaigns/unsubscribe", handler.UnsubscribeHandler)
 	mux.HandleFunc("/api/campaigns", handler.CampaignRouter)
 	mux.HandleFunc("/api/campaigns/", handler.CampaignRouter)
+
+	// Payment Webhooks
+	mux.HandleFunc("/api/webhooks/stripe", handler.StripeWebhook)
+	mux.HandleFunc("/api/webhooks/lemonsqueezy", handler.LemonSqueezyWebhook)
 
 	// Settings endpoints
 	mux.HandleFunc("/api/settings", handler.SettingsRouter)
 	mux.HandleFunc("/api/settings/test-smtp", handler.TestSmtp)
+	mux.HandleFunc("/api/settings/check-dns", handler.CheckDNSHandler)
+
+	// AI Copywriter endpoint
+	mux.HandleFunc("/api/ai/generate-email", handler.GenerateAICopyHandler)
+
+	// Subscription endpoints
+	mux.HandleFunc("/api/subscription", handler.GetSubscription)
+	mux.HandleFunc("/api/pricing", handler.GetPricing)
+	mux.HandleFunc("/api/checkout", handler.CreateCheckout)
+
+	// Team endpoints
+	mux.HandleFunc("/api/teams", handler.GetTeams)
+	mux.HandleFunc("/api/teams/create", handler.CreateTeamHandler)
+	mux.HandleFunc("/api/teams/members", handler.GetTeamMembersHandler)
+	mux.HandleFunc("/api/teams/members/invite", handler.InviteTeamMemberHandler)
+	mux.HandleFunc("/api/teams/members/remove", handler.RemoveTeamMemberHandler)
+
+	// Template endpoints
+	mux.HandleFunc("/api/templates", handler.GetTemplates)
+	mux.HandleFunc("/api/templates/create", handler.CreateTemplate)
+	mux.HandleFunc("/api/templates/update", handler.UpdateTemplate)
+	mux.HandleFunc("/api/templates/send-test", handler.TestSmtp)
+	mux.HandleFunc("/api/templates/", handler.DeleteTemplateHandler)
+
+	// Landing page endpoints
+	mux.HandleFunc("/api/landing-pages", handler.GetLandingPagesHandler)
+	mux.HandleFunc("/api/landing-pages/create", handler.CreateLandingPageHandler)
+	mux.HandleFunc("/api/landing-pages/", handler.GetLandingPageSubmissionsHandler)
+	mux.HandleFunc("/lp/", handler.GetLandingPagePublic)
+
+	// Webhook endpoints
+	mux.HandleFunc("/api/webhooks", handler.GetWebhooksHandler)
+	mux.HandleFunc("/api/webhooks/create", handler.CreateWebhookHandler)
+	mux.HandleFunc("/api/webhooks/", handler.WebhookDetailRouter)
+
+	// Media & Upload endpoints
+	mux.HandleFunc("/api/upload", handler.UploadImage)
+	mux.HandleFunc("/api/media", handler.GetMediaLibrary)
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("/home/saiful/Projects/client-list/backend/uploads"))))
+	mux.Handle("/plan/", http.StripPrefix("/plan/", http.FileServer(http.Dir("/home/saiful/Projects/client-list/plan"))))
+
+	// Background Workers
+	go handler.StartCampaignScheduler()
 
 	corsHandler := corsMiddleware(mux)
 

@@ -25,9 +25,13 @@ type Business struct {
 	TotalRating int     `json:"total_rating"`
 	PlaceID     string  `json:"place_id"`
 	Category    string  `json:"category"`
-	Hours       string  `json:"opening_hours"`
-	Source      string  `json:"source,omitempty"`
-	CreatedAt   string  `json:"created_at"`
+	Hours         string  `json:"opening_hours"`
+	Source        string  `json:"source,omitempty"`
+	EmailStatus   string  `json:"email_status,omitempty"`
+	DecisionMaker string  `json:"decision_maker,omitempty"`
+	LinkedIn      string  `json:"linkedin,omitempty"`
+	PipelineStage string  `json:"pipeline_stage,omitempty"`
+	CreatedAt     string  `json:"created_at"`
 }
 
 type SearchResponse struct {
