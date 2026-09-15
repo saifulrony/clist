@@ -823,8 +823,9 @@ export default function EmailCanvas({
                     {/* Top Action Toolbar (Attached to Selection Border) */}
                     {(isSelected || isHovered) && !isResizing && (
                       <div
-                        className="absolute -top-7 left-0 z-40 flex items-center bg-blue-600 text-white rounded-t-lg shadow-md overflow-hidden text-[10px] font-bold tracking-wider uppercase pointer-events-auto h-7"
-                        style={{ borderTopLeftRadius: "6px", borderTopRightRadius: "6px" }}
+                        className={`absolute z-40 flex items-center bg-blue-600 text-white shadow-md overflow-hidden text-[10px] font-bold tracking-wider uppercase pointer-events-auto h-7 ${
+                          index === 0 ? "top-0 left-0 rounded-b-md" : "-top-7 left-0 rounded-t-md"
+                        }`}
                       >
                         {/* Drag Handle Grip */}
                         <div

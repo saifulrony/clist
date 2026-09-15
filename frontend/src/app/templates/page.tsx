@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/DashboardLayout";
 import { BlockType, EmailBlock, EmailSettings, EmailTemplateData } from "./types";
@@ -80,6 +80,35 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
   const [aiTone, setAiTone] = useState("Direct & Conversational");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiVariants, setAiVariants] = useState<any[]>([]);
+
+  // Undo / Redo & File Import/Export
+  const [historyPast, setHistoryPast] = useState<EmailBlock[][]>([]);
+  const [historyFuture, setHistoryFuture] = useState<EmailBlock[][]>([]);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const pushHistory = useCallback((currentBlocks: EmailBlock[]) => {
+    setHistoryPast((prev) => [...prev.slice(-25), currentBlocks]);
+    setHistoryFuture([]);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (historyPast.length === 0) return;
+    const previous = historyPast[historyPast.length - 1];
+    setHistoryPast((prev) => prev.slice(0, prev.length - 1));
+    setHistoryFuture((prev) => [blocks, ...prev.slice(0, 25)]);
+    setBlocks(previous);
+    showToast("↶ Undo");
+  }, [historyPast, blocks]);
+
+  const handleRedo = useCallback(() => {
+    if (historyFuture.length === 0) return;
+    const next = historyFuture[0];
+    setHistoryFuture((prev) => prev.slice(1));
+    setHistoryPast((prev) => [...prev.slice(-25), blocks]);
+    setBlocks(next);
+    showToast("↷ Redo");
+  }, [historyFuture, blocks]);
 
   const apiBase = typeof window !== "undefined" ? `http://${window.location.hostname}:18001` : "";
 
@@ -164,6 +193,58 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
       })
       .catch(() => {});
   }, [idParam, templates, apiBase]);
+
+  // Global Keyboard Shortcuts (Ctrl+Z Undo, Ctrl+Y / Ctrl+Shift+Z Redo, Ctrl+S Save, Escape, Delete)
+  useEffect(() => {
+    if (currentMode !== "builder") return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = typeof navigator !== "undefined" && navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+      const target = e.target as HTMLElement;
+      const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+
+      // Save: Ctrl+S / Cmd+S
+      if (cmdOrCtrl && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        handleSave();
+        return;
+      }
+
+      // Undo: Ctrl+Z / Cmd+Z (without shift)
+      if (cmdOrCtrl && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
+        if (!isInput) {
+          e.preventDefault();
+          handleUndo();
+          return;
+        }
+      }
+
+      // Redo: Ctrl+Shift+Z / Cmd+Shift+Z or Ctrl+Y
+      if ((cmdOrCtrl && e.shiftKey && (e.key === "z" || e.key === "Z")) || (cmdOrCtrl && (e.key === "y" || e.key === "Y"))) {
+        if (!isInput) {
+          e.preventDefault();
+          handleRedo();
+          return;
+        }
+      }
+
+      // Deselect: Escape
+      if (e.key === "Escape") {
+        setSelectedBlockId(null);
+        return;
+      }
+
+      // Delete block: Delete / Backspace (when not in input)
+      if ((e.key === "Delete" || e.key === "Backspace") && !isInput && selectedBlockId) {
+        e.preventDefault();
+        handleDeleteBlock(selectedBlockId);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [currentMode, selectedBlockId, handleUndo, handleRedo, blocks, settings, templateName, templateSubject, saving]);
 
   const applyTemplateData = (t: any) => {
     setEditingId(t.id);
@@ -323,6 +404,7 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
 
   // Add block to canvas
   const handleAddBlock = (type: BlockType) => {
+    pushHistory(blocks);
     const newBlock = createDefaultBlock(type);
     setBlocks((prev) => [...prev, newBlock]);
     setSelectedBlockId(newBlock.id);
@@ -331,6 +413,7 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
 
   // Insert block at specific index
   const handleInsertBlock = (type: BlockType, index: number) => {
+    pushHistory(blocks);
     const newBlock = createDefaultBlock(type);
     setBlocks((prev) => {
       const next = [...prev];
@@ -340,24 +423,28 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
     setSelectedBlockId(newBlock.id);
   };
 
-  // Reorder blocks
+  // Reorder blocks (Fixing offset bug when fromIndex < toIndex)
   const handleReorderBlocks = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    pushHistory(blocks);
     setBlocks((prev) => {
       const next = [...prev];
       const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
+      const target = fromIndex < toIndex ? toIndex - 1 : toIndex;
+      next.splice(target, 0, moved);
       return next;
     });
   };
 
   // Duplicate block
   const handleDuplicateBlock = (id: string) => {
+    const idx = blocks.findIndex((b) => b.id === id);
+    if (idx === -1) return;
+    pushHistory(blocks);
+    const original = blocks[idx];
+    const cloned = JSON.parse(JSON.stringify(original));
+    cloned.id = `block-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
     setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === id);
-      if (idx === -1) return prev;
-      const original = prev[idx];
-      const cloned = JSON.parse(JSON.stringify(original));
-      cloned.id = `block-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
       const next = [...prev];
       next.splice(idx + 1, 0, cloned);
       return next;
@@ -367,6 +454,7 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
 
   // Delete block
   const handleDeleteBlock = (id: string) => {
+    pushHistory(blocks);
     setBlocks((prev) => prev.filter((b) => b.id !== id));
     if (selectedBlockId === id) {
       setSelectedBlockId(null);
@@ -379,6 +467,85 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
     const html = compileToEmailHtml({ blocks, settings, subject: templateSubject });
     navigator.clipboard.writeText(html);
     showToast("Email HTML copied to clipboard!");
+  };
+
+  // Download HTML file
+  const handleDownloadHtml = () => {
+    const html = compileToEmailHtml({ blocks, settings, subject: templateSubject });
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${templateName.replace(/[^a-zA-Z0-9_-]/g, "_") || "email_template"}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+    showToast("Downloaded HTML file");
+  };
+
+  // Download JSON template
+  const handleDownloadJson = () => {
+    const data = {
+      name: templateName,
+      subject: templateSubject,
+      category: templateCategory,
+      blocks,
+      settings,
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${templateName.replace(/[^a-zA-Z0-9_-]/g, "_") || "email_template"}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+    showToast("Downloaded JSON template");
+  };
+
+  // Import JSON or HTML file from disk
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (!content) return;
+
+      if (file.name.endsWith(".json")) {
+        try {
+          const parsed = JSON.parse(content);
+          if (parsed.blocks && Array.isArray(parsed.blocks)) {
+            pushHistory(blocks);
+            setBlocks(parsed.blocks);
+            if (parsed.settings) setSettings(parsed.settings);
+            if (parsed.name) setTemplateName(parsed.name);
+            if (parsed.subject) setTemplateSubject(parsed.subject);
+            if (parsed.category) setTemplateCategory(parsed.category);
+            showToast("Template imported from JSON!");
+            return;
+          }
+        } catch (err) {
+          console.error("Invalid template JSON", err);
+        }
+      }
+
+      // HTML or fallback
+      const parsedHtml = parseEmailHtml(content);
+      if (parsedHtml) {
+        pushHistory(blocks);
+        setBlocks(parsedHtml.blocks);
+        setSettings(parsedHtml.settings);
+        showToast("Template imported from HTML!");
+      } else {
+        showToast("Could not parse email template");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
   };
 
   // Create default block helper
@@ -917,6 +1084,32 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
                 />
               </div>
             </div>
+
+            {/* Undo / Redo Buttons */}
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/80 ml-1">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={historyPast.length === 0}
+                className="p-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                title="Undo (Ctrl+Z)"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={historyFuture.length === 0}
+                className="p-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-white disabled:opacity-30 disabled:hover:bg-transparent transition-all cursor-pointer"
+                title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Center: Device Switcher */}
@@ -1073,7 +1266,7 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
 
             <button
               onClick={handleCopyHtml}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors flex items-center gap-1.5 cursor-pointer"
               title="Copy compiled table-based email HTML"
             >
               <svg className="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1081,6 +1274,65 @@ function TemplatesPage({ defaultMode = "gallery" }: { defaultMode?: "gallery" | 
               </svg>
               <span className="hidden sm:inline">Copy HTML</span>
             </button>
+
+            {/* Hidden File Input for Import */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,.html"
+              onChange={handleImportFile}
+              className="hidden"
+            />
+
+            {/* Import Button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors flex items-center gap-1 cursor-pointer"
+              title="Import template from JSON or HTML file"
+            >
+              <svg className="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+              <span className="hidden sm:inline">Import</span>
+            </button>
+
+            {/* Export Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50 transition-colors flex items-center gap-1 cursor-pointer"
+                title="Export template as HTML or JSON"
+              >
+                <svg className="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+                <span className="hidden sm:inline">Export</span>
+                <span className="text-[10px] text-slate-400">▾</span>
+              </button>
+
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1.5 w-44 bg-white rounded-xl shadow-2xl border border-slate-200/80 p-1.5 z-50 animate-slide-down">
+                  <button
+                    type="button"
+                    onClick={handleDownloadHtml}
+                    className="w-full px-2.5 py-1.5 rounded-lg text-left text-xs font-medium text-slate-700 hover:bg-slate-100 flex items-center gap-2 cursor-pointer"
+                  >
+                    <span>🌐</span>
+                    <span>Download .html</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadJson}
+                    className="w-full px-2.5 py-1.5 rounded-lg text-left text-xs font-medium text-slate-700 hover:bg-slate-100 flex items-center gap-2 cursor-pointer"
+                  >
+                    <span>📦</span>
+                    <span>Download .json</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             <button
               onClick={handleSave}

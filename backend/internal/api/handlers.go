@@ -647,6 +647,75 @@ func (h *Handler) CreateBusiness(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ImportBusinessesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Businesses []models.Business `json:"businesses"`
+		Source     string            `json:"source"`
+		Category   string            `json:"category"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Businesses) == 0 {
+		jsonError(w, "No businesses provided to import", http.StatusBadRequest)
+		return
+	}
+
+	source := req.Source
+	if source == "" {
+		source = "csv_import"
+	}
+
+	for i := range req.Businesses {
+		req.Businesses[i].Name = strings.TrimSpace(req.Businesses[i].Name)
+		if req.Businesses[i].Name == "" {
+			req.Businesses[i].Name = "Unnamed Lead"
+		}
+		if req.Businesses[i].Source == "" {
+			req.Businesses[i].Source = source
+		}
+		if req.Businesses[i].Category == "" && req.Category != "" {
+			req.Businesses[i].Category = req.Category
+		}
+		if req.Businesses[i].EmailStatus == "" {
+			req.Businesses[i].EmailStatus = "unverified"
+		}
+		if req.Businesses[i].PipelineStage == "" {
+			req.Businesses[i].PipelineStage = "lead"
+		}
+		if req.Businesses[i].Email != "" {
+			if clean, ok := cleanRecipientEmail(req.Businesses[i].Email); ok {
+				req.Businesses[i].Email = clean
+			}
+		}
+	}
+
+	saved, err := h.DB.UpsertBusinesses(req.Businesses, source, "")
+	if err != nil {
+		log.Printf("ImportBusinesses error: %v", err)
+		jsonError(w, "Failed to save businesses: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Successfully imported %d businesses into database (source: %s)", saved, source)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"saved":   saved,
+		"total":   len(req.Businesses),
+		"source":  source,
+	})
+}
+
 func (h *Handler) UpdateBusiness(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonError(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1433,6 +1502,13 @@ func (h *Handler) processDueFollowUpSteps() {
 	}
 
 	for _, item := range dueRecipients {
+		cleanTo, ok := cleanRecipientEmail(item.Email)
+		if !ok {
+			log.Printf("Follow-up step: Skipping invalid recipient email format: %s", item.Email)
+			continue
+		}
+		item.Email = cleanTo
+
 		if h.DB.IsEmailUnsubscribed(item.Email) {
 			continue
 		}
@@ -1885,6 +1961,26 @@ func (h *Handler) DuplicateCampaign(w http.ResponseWriter, r *http.Request, camp
 	})
 }
 
+func cleanRecipientEmail(raw string) (string, bool) {
+	email := strings.TrimSpace(raw)
+	if strings.Contains(email, "%") {
+		if unescaped, err := url.QueryUnescape(email); err == nil {
+			email = strings.TrimSpace(unescaped)
+		}
+	}
+	email = strings.Trim(email, `"'<>()[]{},;:/\ `)
+	if !verifier.ValidateSyntax(email) {
+		return "", false
+	}
+	lower := strings.ToLower(email)
+	for _, ext := range []string{".webp", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", "@2x", "@3x"} {
+		if strings.Contains(lower, ext) {
+			return "", false
+		}
+	}
+	return email, true
+}
+
 func (h *Handler) sendCampaignEmails(campaignID int, c models.Campaign, recipients []models.CampaignRecipient) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -1961,6 +2057,13 @@ func (h *Handler) sendCampaignEmails(campaignID int, c models.Campaign, recipien
 	if err != nil || len(recipientsWithBusiness) == 0 {
 		log.Printf("Campaign %d: Fallback to basic recipient list", campaignID)
 		for _, r := range recipients {
+			cleanTo, ok := cleanRecipientEmail(r.Email)
+			if !ok {
+				log.Printf("Campaign %d: Skipping invalid recipient email format: %s", campaignID, r.Email)
+				continue
+			}
+			r.Email = cleanTo
+
 			if h.DB.IsEmailUnsubscribed(r.Email) {
 				log.Printf("Campaign %d: Skipping unsubscribed recipient %s", campaignID, r.Email)
 				continue
@@ -2017,6 +2120,13 @@ func (h *Handler) sendCampaignEmails(campaignID int, c models.Campaign, recipien
 		}
 	} else {
 		for _, r := range recipientsWithBusiness {
+			cleanTo, ok := cleanRecipientEmail(r.Email)
+			if !ok {
+				log.Printf("Campaign %d: Skipping invalid recipient email format: %s", campaignID, r.Email)
+				continue
+			}
+			r.Email = cleanTo
+
 			if h.DB.IsEmailUnsubscribed(r.Email) {
 				log.Printf("Campaign %d: Skipping unsubscribed recipient %s", campaignID, r.Email)
 				continue

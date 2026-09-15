@@ -1230,6 +1230,94 @@ const EXPORT_FIELDS = [
   { key: "created_at", label: "Collected", default: false },
 ];
 
+function parseCsv(text: string): string[][] {
+  const lines: string[][] = [];
+  let row: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      row.push(current.trim());
+      current = "";
+    } else if ((char === "\r" || char === "\n") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") i++;
+      row.push(current.trim());
+      if (row.some((cell) => cell.length > 0)) {
+        lines.push(row);
+      }
+      row = [];
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  if (current.length > 0 || row.length > 0) {
+    row.push(current.trim());
+    if (row.some((cell) => cell.length > 0)) {
+      lines.push(row);
+    }
+  }
+  return lines;
+}
+
+function autoDetectCsvMapping(headers: string[]): Record<string, string> {
+  const mapping: Record<string, string> = {
+    name: "",
+    email: "",
+    phone: "",
+    website: "",
+    address: "",
+    city: "",
+    country: "",
+    category: "",
+    decision_maker: "",
+    linkedin: "",
+    pipeline_stage: "",
+  };
+
+  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  headers.forEach((h) => {
+    const c = clean(h);
+    if (!mapping.name && (c.includes("company") || c.includes("business") || c === "name" || c === "title" || c.includes("leadname") || c.includes("organization"))) {
+      mapping.name = h;
+    } else if (!mapping.email && (c.includes("email") || c.includes("mail"))) {
+      mapping.email = h;
+    } else if (!mapping.phone && (c.includes("phone") || c.includes("tel") || c.includes("mobile") || c.includes("cell"))) {
+      mapping.phone = h;
+    } else if (!mapping.website && (c.includes("website") || c.includes("web") || c.includes("url") || c.includes("domain") || c.includes("site"))) {
+      mapping.website = h;
+    } else if (!mapping.address && (c.includes("address") || c.includes("street") || c.includes("location"))) {
+      mapping.address = h;
+    } else if (!mapping.city && (c === "city" || c === "town")) {
+      mapping.city = h;
+    } else if (!mapping.country && (c === "country" || c === "nation" || c === "state")) {
+      mapping.country = h;
+    } else if (!mapping.category && (c.includes("category") || c.includes("industry") || c.includes("niche") || c.includes("type") || c.includes("tag"))) {
+      mapping.category = h;
+    } else if (!mapping.decision_maker && (c.includes("decision") || c.includes("contact") || c.includes("owner") || c.includes("ceo") || c.includes("founder") || c.includes("person"))) {
+      mapping.decision_maker = h;
+    } else if (!mapping.linkedin && c.includes("linkedin")) {
+      mapping.linkedin = h;
+    } else if (!mapping.pipeline_stage && (c.includes("stage") || c.includes("status"))) {
+      mapping.pipeline_stage = h;
+    }
+  });
+
+  return mapping;
+}
+
 function DatabaseTab({ apiBase }: { apiBase: string }) {
   const searchParams = useSearchParams();
   const router = typeof window !== "undefined" ? window.history : null;
@@ -1253,11 +1341,38 @@ function DatabaseTab({ apiBase }: { apiBase: string }) {
   const [deleting, setDeleting] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [verifying, setVerifying] = useState(false);
+
+  // Export State
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<"all" | "page" | "selected">("all");
   const [exportFields, setExportFields] = useState<Set<string>>(
     new Set(EXPORT_FIELDS.filter((f) => f.default).map((f) => f.key))
   );
   const [exporting, setExporting] = useState(false);
+
+  // Import CSV State
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importRawRows, setImportRawRows] = useState<string[][]>([]);
+  const [importHeaders, setImportHeaders] = useState<string[]>([]);
+  const [importMapping, setImportMapping] = useState<Record<string, string>>({
+    name: "",
+    email: "",
+    phone: "",
+    website: "",
+    address: "",
+    city: "",
+    country: "",
+    category: "",
+    decision_maker: "",
+    linkedin: "",
+    pipeline_stage: "",
+  });
+  const [importCategory, setImportCategory] = useState("");
+  const [importCustomCategory, setImportCustomCategory] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ saved: number; total: number } | null>(null);
+  const importFileInputRef = useRef<HTMLInputElement>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editBusiness, setEditBusiness] = useState<any>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -1545,6 +1660,167 @@ function DatabaseTab({ apiBase }: { apiBase: string }) {
     }
   };
 
+  const handleImportFileSelect = (file: File) => {
+    setImportFile(file);
+    setImportResult(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+      const parsed = parseCsv(text);
+      if (parsed.length < 2) {
+        alert("The CSV file must contain at least a header row and one row of business data.");
+        return;
+      }
+      const headers = parsed[0];
+      setImportHeaders(headers);
+      setImportRawRows(parsed.slice(1));
+      const autoMap = autoDetectCsvMapping(headers);
+      setImportMapping(autoMap);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExecuteImport = async () => {
+    if (importRawRows.length === 0) return;
+    setImporting(true);
+
+    try {
+      const mappedBusinesses = importRawRows.map((row) => {
+        const getColVal = (field: string) => {
+          const headerName = importMapping[field];
+          if (!headerName) return "";
+          const idx = importHeaders.indexOf(headerName);
+          return idx >= 0 && row[idx] ? row[idx].trim() : "";
+        };
+
+        const effectiveCategory =
+          getColVal("category") ||
+          importCustomCategory.trim() ||
+          importCategory ||
+          (category ? category : "csv_import");
+
+        return {
+          name: getColVal("name") || "Unnamed Lead",
+          email: getColVal("email"),
+          phone: getColVal("phone"),
+          website: getColVal("website"),
+          address: getColVal("address"),
+          city: getColVal("city"),
+          country: getColVal("country") || "United States",
+          category: effectiveCategory,
+          decision_maker: getColVal("decision_maker"),
+          linkedin: getColVal("linkedin"),
+          pipeline_stage: getColVal("pipeline_stage") || "lead",
+          source: "csv_import",
+          email_status: "unverified",
+        };
+      });
+
+      const res = await fetch(`${apiBase}/api/business/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          businesses: mappedBusinesses,
+          source: "csv_import",
+          category: importCustomCategory.trim() || importCategory,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to import CSV");
+      }
+
+      const data = await res.json();
+      setImportResult({ saved: data.saved, total: data.total });
+      fetchData();
+      fetchCategories();
+      fetchFilters();
+    } catch (err: any) {
+      alert(err.message || "Failed to import CSV");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleDownloadSampleCsv = () => {
+    const sample = [
+      ["Company Name", "Email", "Phone", "Website", "Address", "City", "Country", "Category", "Decision Maker", "LinkedIn"],
+      ["Acme Dental Care", "dr.smith@acmedental.com", "+1-415-555-0192", "https://acmedental.com", "100 Market St", "San Francisco", "United States", "Dental", "Dr. John Smith", "https://linkedin.com/in/johnsmith"],
+      ["Apex Roofing & Siding", "contact@apexroofing.com", "+1-212-555-0144", "https://apexroofing.com", "250 Broadway", "New York", "United States", "Roofing", "Sarah Jenkins", "https://linkedin.com/in/sarahjenkins"],
+      ["CloudScale Technologies", "sales@cloudscale.io", "+1-800-555-0188", "https://cloudscale.io", "742 Evergreen Terrace", "Seattle", "United States", "SaaS", "Alex Rivera", "https://linkedin.com/in/alexrivera"],
+    ];
+    const csv = "\uFEFF" + sample.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "clientlist_sample_leads.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportCsv = async () => {
+    setExporting(true);
+    try {
+      let dataToExport: any[] = [];
+
+      if (exportScope === "selected" && selected.size > 0) {
+        dataToExport = businesses.filter((b) => selected.has(b.id));
+      } else if (exportScope === "page") {
+        dataToExport = businesses;
+      } else {
+        // Fetch all matching records from server (up to 10,000 leads)
+        const params = new URLSearchParams({ limit: "10000", offset: "0" });
+        if (search) params.set("q", search);
+        if (category) params.set("category", category);
+        if (country) params.set("country", country);
+        if (filterCity) params.set("city", filterCity);
+        if (hasEmail) params.set("has_email", hasEmail);
+        if (hasPhone) params.set("has_phone", hasPhone);
+        if (hasWebsite) params.set("has_website", hasWebsite);
+        if (pipelineStage) params.set("pipeline_stage", pipelineStage);
+
+        const res = await fetch(`${apiBase}/api/crawl/search?${params}`);
+        if (res.ok) {
+          const data = await res.json();
+          dataToExport = data.results || businesses;
+        } else {
+          dataToExport = businesses;
+        }
+      }
+
+      const fields = EXPORT_FIELDS.filter((f) => exportFields.has(f.key));
+      const headers = fields.map((f) => f.label);
+      const getVal = (biz: any, key: string) => {
+        const v = biz[key];
+        if (v === undefined || v === null) return "";
+        if (key === "rating") return Number(v).toFixed(1);
+        if (key === "created_at") return v ? new Date(v).toLocaleDateString() : "";
+        return String(v);
+      };
+      const rows = dataToExport.map((biz) => fields.map((f) => getVal(biz, f.key)));
+      const csv = "\uFEFF" + [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const fileTag = category ? category.replace(/[^a-zA-Z0-9_-]/g, "_") : "database";
+      a.download = `clientlist-${fileTag}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setExportOpen(false);
+    } catch (err) {
+      console.error("Export error:", err);
+      alert("Failed to export CSV");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (catRef.current && !catRef.current.contains(e.target as Node)) {
@@ -1566,13 +1842,47 @@ function DatabaseTab({ apiBase }: { apiBase: string }) {
           <h2 className="text-xl font-bold text-slate-900">Database</h2>
           <p className="text-sm text-slate-500">Browse and filter all collected businesses</p>
         </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="btn-primary py-2 px-4 text-xs font-bold flex items-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer self-start sm:self-auto hover:-translate-y-0.5 transition-all"
-        >
-          <span className="text-base leading-none">＋</span>
-          <span>Add New Lead</span>
-        </button>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto flex-wrap">
+          {/* Import CSV Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setImportOpen(true);
+              setImportResult(null);
+            }}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-slate-700 hover:text-indigo-600 hover:bg-slate-50 border border-slate-200 shadow-xs flex items-center gap-1.5 cursor-pointer transition-all hover:border-indigo-200 active:scale-95"
+            title="Import businesses from a CSV spreadsheet"
+          >
+            <svg className="w-4 h-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+            <span>Import CSV</span>
+          </button>
+
+          {/* Export CSV Button */}
+          <button
+            type="button"
+            onClick={() => setExportOpen(true)}
+            disabled={total === 0}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-slate-700 hover:text-emerald-600 hover:bg-slate-50 border border-slate-200 shadow-xs flex items-center gap-1.5 cursor-pointer transition-all hover:border-emerald-200 disabled:opacity-40 active:scale-95"
+            title="Export database leads to CSV"
+          >
+            <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            <span>Export CSV</span>
+          </button>
+
+          {/* Add New Lead Button */}
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="btn-primary py-2 px-4 text-xs font-bold flex items-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer hover:-translate-y-0.5 transition-all"
+          >
+            <span className="text-base leading-none">＋</span>
+            <span>Add Lead</span>
+          </button>
+        </div>
       </div>
 
       <div className="card overflow-hidden">
@@ -1916,15 +2226,32 @@ function DatabaseTab({ apiBase }: { apiBase: string }) {
                     <span>{verifying ? "Verifying..." : "Verify Emails"}</span>
                   </button>
                 )}
+                {/* Import CSV Button in footer */}
                 <button
+                  type="button"
+                  onClick={() => {
+                    setImportOpen(true);
+                    setImportResult(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 border border-indigo-200 flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                  title="Import businesses from a CSV spreadsheet"
+                >
+                  <svg className="w-3.5 h-3.5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                  </svg>
+                  <span>Import CSV</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setExportOpen(true)}
                   disabled={total === 0}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-green-600 hover:bg-green-50 disabled:opacity-40 border border-green-200 flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 border border-emerald-200 flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
                 >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
                   </svg>
-                  Export CSV
+                  <span>Export CSV</span>
                 </button>
                 <button
                   onClick={deleteAll}
@@ -1953,84 +2280,468 @@ function DatabaseTab({ apiBase }: { apiBase: string }) {
         )}
       </div>
 
-      {/* Export Modal */}
+      {/* Enhanced Export Modal with Scopes and Fields */}
       {exportOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setExportOpen(false)}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-slate-900">Export CSV</h3>
-              <button onClick={() => setExportOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <p className="text-sm text-slate-500 mb-4">Select which fields to include in the CSV file:</p>
-            <div className="space-y-2 max-h-[320px] overflow-y-auto">
-              {EXPORT_FIELDS.map((field) => (
-                <label key={field.key} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={exportFields.has(field.key)}
-                    onChange={(e) => {
-                      const next = new Set(exportFields);
-                      if (e.target.checked) next.add(field.key);
-                      else next.delete(field.key);
-                      setExportFields(next);
-                    }}
-                    className="rounded border-slate-300 text-blue-600"
-                  />
-                  <span className="text-sm text-slate-700">{field.label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="flex justify-between items-center mt-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in" onClick={() => setExportOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-slate-100 animate-slide-down" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-lg border border-emerald-100">
+                  📥
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Export Database Leads</h3>
+                  <p className="text-xs text-slate-500">Download filtered leads to CSV spreadsheet</p>
+                </div>
+              </div>
               <button
-                onClick={() => setExportFields(new Set(EXPORT_FIELDS.map((f) => f.key)))}
-                className="text-xs text-slate-500 hover:text-slate-700"
+                type="button"
+                onClick={() => setExportOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
               >
-                Select All
+                ✕
               </button>
-              <div className="flex gap-2">
+            </div>
+
+            {/* Scope Selection */}
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                1. Select Export Scope
+              </label>
+              <div className="grid grid-cols-3 gap-2">
                 <button
+                  type="button"
+                  onClick={() => setExportScope("all")}
+                  className={`p-2.5 rounded-xl border text-xs text-left transition-all cursor-pointer ${
+                    exportScope === "all"
+                      ? "border-emerald-500 bg-emerald-50/60 text-emerald-900 font-bold ring-1 ring-emerald-500"
+                      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span>All Filtered</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold">
+                      {total.toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-normal leading-tight">Entire matching database</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExportScope("page")}
+                  className={`p-2.5 rounded-xl border text-xs text-left transition-all cursor-pointer ${
+                    exportScope === "page"
+                      ? "border-emerald-500 bg-emerald-50/60 text-emerald-900 font-bold ring-1 ring-emerald-500"
+                      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span>Current Page</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-bold">
+                      {businesses.length}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-normal leading-tight">Rows on this screen</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => selected.size > 0 && setExportScope("selected")}
+                  disabled={selected.size === 0}
+                  className={`p-2.5 rounded-xl border text-xs text-left transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                    exportScope === "selected"
+                      ? "border-emerald-500 bg-emerald-50/60 text-emerald-900 font-bold ring-1 ring-emerald-500"
+                      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span>Selected Only</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-100 text-blue-800 font-bold">
+                      {selected.size}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-normal leading-tight">Checkboxed leads</p>
+                </button>
+              </div>
+            </div>
+
+            {/* Field Selection */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  2. Choose Columns ({exportFields.size}/{EXPORT_FIELDS.length})
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExportFields(new Set(EXPORT_FIELDS.map((f) => f.key)))}
+                    className="text-[11px] font-bold text-emerald-600 hover:underline cursor-pointer"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setExportFields(new Set(["name", "email", "phone"]))}
+                    className="text-[11px] font-medium text-slate-500 hover:text-slate-800 cursor-pointer"
+                  >
+                    Essential Only
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-[220px] overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200/80">
+                {EXPORT_FIELDS.map((field) => (
+                  <label
+                    key={field.key}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer select-none transition-all ${
+                      exportFields.has(field.key) ? "bg-white text-slate-900 shadow-2xs font-semibold" : "text-slate-500 hover:bg-slate-200/50 font-normal"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={exportFields.has(field.key)}
+                      onChange={(e) => {
+                        const next = new Set(exportFields);
+                        if (e.target.checked) next.add(field.key);
+                        else next.delete(field.key);
+                        setExportFields(next);
+                      }}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="truncate">{field.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-xs text-slate-500 font-medium">
+                {exportScope === "all"
+                  ? `Exporting ${total.toLocaleString()} leads`
+                  : exportScope === "page"
+                  ? `Exporting ${businesses.length} leads`
+                  : `Exporting ${selected.size} selected leads`}
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
                   onClick={() => setExportOpen(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100"
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    setExporting(true);
-                    const fields = EXPORT_FIELDS.filter((f) => exportFields.has(f.key));
-                    const headers = fields.map((f) => f.label);
-                    const getVal = (biz: any, key: string) => {
-                      const v = biz[key];
-                      if (v === undefined || v === null) return "";
-                      if (key === "rating") return Number(v).toFixed(1);
-                      if (key === "created_at") return v ? new Date(v).toLocaleDateString() : "";
-                      return String(v);
-                    };
-                    const rows = businesses.map((biz) => fields.map((f) => getVal(biz, f.key)));
-                    const csv = [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-                    const blob = new Blob([csv], { type: "text/csv" });
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `database-export.csv`;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                    setExporting(false);
-                    setExportOpen(false);
-                  }}
+                  type="button"
+                  onClick={handleExportCsv}
                   disabled={exportFields.size === 0 || exporting}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-md shadow-emerald-600/20 disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
                 >
-                  {exporting ? "Exporting..." : `Export ${businesses.length} rows`}
+                  {exporting ? (
+                    <span>Generating CSV...</span>
+                  ) : (
+                    <>
+                      <span>📥</span>
+                      <span>Download CSV</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comprehensive Import CSV Modal */}
+      {importOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in" onClick={() => setImportOpen(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-6 border border-slate-100 animate-slide-down max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl border border-indigo-100">
+                  📤
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Import Businesses via CSV</h3>
+                  <p className="text-xs text-slate-500">Add prospects and leads directly to your client database</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImportOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto py-4 space-y-5">
+              {importResult ? (
+                /* Success Result View */
+                <div className="py-8 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-3xl mx-auto">
+                    ✓
+                  </div>
+                  <div>
+                    <h4 className="text-lg font-bold text-slate-900">CSV Import Completed!</h4>
+                    <p className="text-sm text-slate-600 mt-1">
+                      Successfully saved <span className="font-bold text-emerald-600">{importResult.saved}</span> businesses out of{" "}
+                      <span className="font-bold text-slate-800">{importResult.total}</span> records.
+                    </p>
+                  </div>
+                  <div className="pt-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportOpen(false);
+                        setImportFile(null);
+                        setImportRawRows([]);
+                        setImportResult(null);
+                      }}
+                      className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                    >
+                      View Database
+                    </button>
+                  </div>
+                </div>
+              ) : !importFile || importRawRows.length === 0 ? (
+                /* File Selection / Dropzone */
+                <div className="space-y-4">
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImportFileSelect(file);
+                    }}
+                    className="hidden"
+                  />
+
+                  <div
+                    onClick={() => importFileInputRef.current?.click()}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const file = e.dataTransfer.files?.[0];
+                      if (file && (file.name.endsWith(".csv") || file.type.includes("csv"))) {
+                        handleImportFileSelect(file);
+                      } else {
+                        alert("Please upload a valid .csv file");
+                      }
+                    }}
+                    className="border-2 border-dashed border-indigo-200 hover:border-indigo-500 rounded-3xl p-10 text-center bg-indigo-50/30 hover:bg-indigo-50/60 transition-all cursor-pointer group"
+                  >
+                    <div className="w-14 h-14 rounded-2xl bg-white shadow-sm flex items-center justify-center text-2xl mx-auto mb-3 group-hover:scale-110 transition-transform">
+                      📄
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-800 mb-1">Click to select or drag and drop your CSV file</h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Supports comma-separated CSV with headers like Company Name, Email, Phone, Website, Category, etc.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-slate-600">
+                    <div className="flex items-center gap-2">
+                      <span>💡</span>
+                      <span>Want to check the exact columns format?</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleDownloadSampleCsv}
+                      className="font-bold text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Download Sample CSV</span>
+                      <span>→</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Step 2: Mapping & Preview */
+                <div className="space-y-4">
+                  {/* File Banner */}
+                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl">📄</span>
+                      <div>
+                        <div className="text-xs font-bold text-slate-900">{importFile.name}</div>
+                        <div className="text-[11px] text-slate-500">
+                          {(importFile.size / 1024).toFixed(1)} KB •{" "}
+                          <span className="font-bold text-indigo-600">{importRawRows.length} rows</span> detected
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportFile(null);
+                        setImportRawRows([]);
+                        setImportHeaders([]);
+                      }}
+                      className="text-xs font-semibold text-red-500 hover:text-red-700 underline cursor-pointer"
+                    >
+                      Change File
+                    </button>
+                  </div>
+
+                  {/* Category Assignment */}
+                  <div className="p-4 bg-indigo-50/40 rounded-2xl border border-indigo-100 space-y-2">
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                      Assign Default Category
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        value={importCategory}
+                        onChange={(e) => {
+                          setImportCategory(e.target.value);
+                          if (e.target.value !== "custom") setImportCustomCategory("");
+                        }}
+                        className="w-full text-xs p-2 bg-white border border-slate-200 rounded-xl outline-none font-medium capitalize"
+                      >
+                        <option value="">(Auto-detect from CSV column)</option>
+                        {categories.map((c) => (
+                          <option key={c.category} value={c.category} className="capitalize">
+                            {c.category.replace(/_/g, " ")} ({c.count})
+                          </option>
+                        ))}
+                        <option value="custom">＋ Create New Category...</option>
+                      </select>
+
+                      {importCategory === "custom" && (
+                        <input
+                          type="text"
+                          value={importCustomCategory}
+                          onChange={(e) => setImportCustomCategory(e.target.value)}
+                          placeholder="Type new category name..."
+                          className="w-full text-xs p-2 bg-white border border-slate-200 rounded-xl outline-none font-medium"
+                          autoFocus
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Column Mapping */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Map CSV Columns
+                      </label>
+                      <span className="text-[11px] text-slate-400">Match your spreadsheet headers</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto p-3 bg-slate-50 rounded-2xl border border-slate-200/80">
+                      {[
+                        { key: "name", label: "Company / Business Name *", required: true },
+                        { key: "email", label: "Email Address" },
+                        { key: "phone", label: "Phone Number" },
+                        { key: "website", label: "Website URL" },
+                        { key: "address", label: "Street Address" },
+                        { key: "city", label: "City" },
+                        { key: "country", label: "Country" },
+                        { key: "category", label: "Category / Industry" },
+                        { key: "decision_maker", label: "Decision Maker / Contact" },
+                        { key: "linkedin", label: "LinkedIn URL" },
+                        { key: "pipeline_stage", label: "Pipeline Stage" },
+                      ].map((item) => (
+                        <div key={item.key} className="flex items-center justify-between bg-white p-2 rounded-xl border border-slate-200 text-xs">
+                          <span className={`font-semibold truncate max-w-[130px] ${item.required ? "text-indigo-700" : "text-slate-700"}`}>
+                            {item.label}
+                          </span>
+                          <select
+                            value={importMapping[item.key] || ""}
+                            onChange={(e) =>
+                              setImportMapping((prev) => ({
+                                ...prev,
+                                [item.key]: e.target.value,
+                              }))
+                            }
+                            className="text-xs p-1 rounded-lg border border-slate-200 bg-slate-50 font-medium max-w-[150px] outline-none"
+                          >
+                            <option value="">(Skip field)</option>
+                            {importHeaders.map((header) => (
+                              <option key={header} value={header}>
+                                {header}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Sample Preview */}
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      Preview First 3 Rows from File
+                    </div>
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl max-h-[140px] text-xs">
+                      <table className="w-full text-left">
+                        <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
+                          <tr>
+                            {importHeaders.slice(0, 6).map((h, i) => (
+                              <th key={i} className="p-2 whitespace-nowrap">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {importRawRows.slice(0, 3).map((row, rIdx) => (
+                            <tr key={rIdx} className="hover:bg-slate-50 text-slate-600">
+                              {row.slice(0, 6).map((cell, cIdx) => (
+                                <td key={cIdx} className="p-2 truncate max-w-[150px]">
+                                  {cell || "-"}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            {!importResult && importFile && importRawRows.length > 0 && (
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImportFile(null);
+                    setImportRawRows([]);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteImport}
+                  disabled={importing}
+                  className="px-6 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all shadow-md shadow-indigo-600/20 disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+                >
+                  {importing ? (
+                    <span>Importing {importRawRows.length} Leads...</span>
+                  ) : (
+                    <>
+                      <span>⚡</span>
+                      <span>Import {importRawRows.length} Leads</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

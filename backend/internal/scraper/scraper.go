@@ -176,17 +176,33 @@ func (c *Client) fetchPage(ctx context.Context, url string) string {
 	return string(body)
 }
 
+func cleanEmail(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.Contains(raw, "%") {
+		if unescaped, err := url.QueryUnescape(raw); err == nil {
+			raw = strings.TrimSpace(unescaped)
+		}
+	}
+	// Strip query parameters e.g. ?subject=...
+	if idx := strings.Index(raw, "?"); idx != -1 {
+		raw = raw[:idx]
+	}
+	raw = strings.Trim(raw, `"'<>()[]{},;:/\ `)
+	return strings.TrimSpace(raw)
+}
+
 func extractEmail(html string) string {
 	// Try mailto: links first
 	if m := emailRegex.FindStringSubmatch(html); len(m) > 1 {
-		email := strings.TrimSpace(m[1])
+		email := cleanEmail(m[1])
 		if !isJunkEmail(email) {
 			return email
 		}
 	}
 	// Try general email patterns
-	if m := emailFind.FindString(html); m != "" {
-		email := strings.TrimSpace(m)
+	matches := emailFind.FindAllString(html, -1)
+	for _, m := range matches {
+		email := cleanEmail(m)
 		if !isJunkEmail(email) {
 			return email
 		}
@@ -230,19 +246,40 @@ func cleanPhone(s string) string {
 }
 
 func isJunkEmail(email string) bool {
-	lower := strings.ToLower(email)
+	lower := strings.ToLower(cleanEmail(email))
+	if len(lower) < 6 || !strings.Contains(lower, "@") || !strings.Contains(lower, ".") {
+		return true
+	}
+
+	// Reject image / asset artifacts falsely matched as emails
+	imgExtensions := []string{
+		".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp", ".tiff",
+		"@2x", "@3x", "@1x",
+	}
+	for _, ext := range imgExtensions {
+		if strings.Contains(lower, ext) {
+			return true
+		}
+	}
+
 	junk := []string{
 		"example.com", "sentry.io", "wixpress.com", "w3.org",
 		"schema.org", "googleapis.com", "gstatic.com",
 		"cloudflare.com", "jquery", "wordpress.org",
 		"localhost", "test.com", "email.com",
 		"no-reply", "noreply", "donotreply",
-		".png", ".jpg", ".gif", ".svg", ".webp",
 	}
 	for _, j := range junk {
 		if strings.Contains(lower, j) {
 			return true
 		}
 	}
+
+	// Ensure standard email regex format
+	validRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,10}$`)
+	if !validRegex.MatchString(lower) {
+		return true
+	}
+
 	return false
 }

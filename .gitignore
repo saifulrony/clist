@@ -5,3 +5,6 @@ frontend/.vercel
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+backend/server
+backend/data/*.db-shm
+backend/data/*.db-wal

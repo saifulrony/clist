@@ -77,6 +77,7 @@ func main() {
 	mux.HandleFunc("/api/business/enrich-emails", handler.EnrichEmails)
 	mux.HandleFunc("/api/business/clean-websites", handler.CleanUselessWebsites)
 	mux.HandleFunc("/api/business/create", handler.CreateBusiness)
+	mux.HandleFunc("/api/business/import", handler.ImportBusinessesHandler)
 	mux.HandleFunc("/api/business/update", handler.UpdateBusiness)
 	mux.HandleFunc("/api/business/verify-emails", handler.VerifyEmails)
 	mux.HandleFunc("/api/business/verify-email", handler.VerifySingleEmail)
